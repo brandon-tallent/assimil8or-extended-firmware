@@ -1,0 +1,13 @@
+/build/
+/dist/
+/vendor/
+__pycache__/
+*.pyc
+.DS_Store
+# Rossum's software and anything patched from it never belong in this repo.
+/app
+*.bin
+*.zip
+*.elf
+*.o
+*.pdf

@@ -1,0 +1,83 @@
+# Assimil8or firmware - Tallent Edition
+
+An unofficial firmware extension for the Rossum Electro-Music Assimil8or:
+
+* A three-band EQ and high-pass filter on every channel, with an EQ of its own for any zone and CV control of every band.
+* Grain mode: a channel or stereo pair plays its sample as up to eight overlapping grains, for stretching, freezing and scattering, with CV control of eight parameters.
+* Resample: record a channel's own output straight into one of its zones.
+* Presets keep the EQ and grain settings, in files Rossum's software still loads.
+* MIDI remote control (with a Locutus): read and edit presets, browse the card, audition and assign samples, drive the panel and read the display. The protocol is documented so anyone can write an editor.
+
+All original features remain. The new pages sit behind a second press of the Mutate and Phase Mod buttons, and Rossum's software can be loaded again at any time.
+
+See the [New Features Guide](https://brandon-tallent.github.io/assimil8or-extended-firmware/manual.html) for how everything works.
+
+## Installing
+
+**[Open the firmware patcher](https://brandon-tallent.github.io/assimil8or-extended-firmware/)**
+
+1. Download **Assimil8or software v3.04** (`app-v304-260610.zip`) from the Downloads section of
+   [Rossum's Assimil8or page](https://www.rossum-electro.com/products/assimil8or/). There is no need to unzip it.
+2. Open the patcher above and select that zip. `assimil8or-tallent-edition.zip` downloads automatically.
+3. Unzip it and copy both files, `app` and `ext-….bin`, to the top level of your micro SD card.
+4. With the card in the front panel slot, use **Utilities > Load Software** and reboot as for any software update.
+5. Leave the card in. Shortly after the restart the top line of the display reads `Extension installed`.
+
+Your software file stays in your browser; nothing is uploaded. To use the patcher
+offline, click **Save this tool for offline use** on the page, then open the
+downloaded HTML file in a current browser.
+
+To go back, load Rossum's own `app` with **Utilities > Load Software**.
+
+### CLI alternative
+
+Download `assimil8or.a8patch` from the
+[latest release](https://github.com/brandon-tallent/assimil8or-extended-firmware/releases/latest)
+and run this command from a copy of this repository:
+
+```sh
+python3 patcher.py /path/to/app-v304-260610.zip assimil8or.a8patch -o card
+```
+
+It writes `card/app` and `card/ext-….bin`.
+
+## Writing an editor
+
+[PROTOCOL.md](PROTOCOL.md) is the complete MIDI System Exclusive protocol, with a
+runnable example. [PRESET_FORMAT.md](PRESET_FORMAT.md) describes the preset file,
+including the lines this firmware adds.
+
+## Building from source
+
+- Install the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
+  (`arm-none-eabi-gcc`). Releases are built with GCC 16.1.0; another version makes a
+  working patch with a build ID of its own.
+
+```sh
+make
+make check
+```
+
+Apply the patch to Rossum's download with both patchers and compare them:
+
+```sh
+A8_STOCK_APP=/path/to/app-v304-260610.zip make check
+```
+
+Build the release patch and the browser patcher:
+
+```sh
+A8_STOCK_APP=/path/to/app-v304-260610.zip make release
+```
+
+## File layout
+
+- `src/` the overlay: C and assembly that replace a reclaimed region of the stock image
+- `ext/` the extension image the module loads from the card: the editor commands and grain mode
+- `src/stock_abi.ld` the stock addresses the code links against; `src/patch_layout.json` the instructions the patch replaces
+- `tools/make_patch.py` builds the patch; `patcher.py` and `web/` apply it
+
+## License
+
+Our original work is MIT licensed. No rights to Rossum's software are granted by
+this repository.

@@ -1,0 +1,535 @@
+{
+ "firmware": {
+  "version": "3.04",
+  "app_sha256": "4d8dff5d4f895d1a125de72c9a0dd3a7f44d206174e976baf4b8133a5f3bf763",
+  "app_bytes": 637648,
+  "load_address": "0x80000000"
+ },
+ "overlay": {
+  "start": "0x8006e4f8",
+  "end": "0x8007ba78",
+  "build_id_offset": 12,
+  "crc_offset": 20
+ },
+ "storage": {
+  "start": "0x9b001000",
+  "end": "0x9b010000"
+ },
+ "extension": {
+  "base": "0x9b010000",
+  "max_bytes": 983040,
+  "header_bytes": 40,
+  "build_id_offset": 8,
+  "file_bytes_offset": 16,
+  "crc_offset": 24,
+  "name": "ext-{build_id}.bin"
+ },
+ "hooks": [
+  {
+   "address": "0x80048f6c",
+   "instruction": "b",
+   "target": "patch_rx_poll",
+   "site": "midi_rx_poll"
+  },
+  {
+   "address": "0x80046e9c",
+   "instruction": "b",
+   "target": "sysex_panel_service",
+   "site": "midi_service_noop"
+  },
+  {
+   "address": "0x80046ba4",
+   "instruction": "b",
+   "target": "patch_cv_transmit",
+   "site": "midi_transmit_cv_changes"
+  },
+  {
+   "address": "0x80046ea0",
+   "instruction": "b",
+   "target": "patch_program_transmit",
+   "site": "midi_transmit_preset_program_change"
+  },
+  {
+   "address": "0x8006bbb0",
+   "instruction": "b",
+   "target": "patch_uart_put",
+   "site": "uart_fifo_char_put"
+  },
+  {
+   "address": "0x80069504",
+   "instruction": "b",
+   "target": "display_enqueue_hook",
+   "site": "oled_enqueue_transfer"
+  },
+  {
+   "address": "0x8002eed4",
+   "instruction": "b",
+   "target": "screenshot_display_hook",
+   "site": "cdisplay_task_service"
+  },
+  {
+   "address": "0x80005898",
+   "instruction": "b",
+   "target": "display_glyph_hook",
+   "site": "ui_draw_proportional_glyph"
+  },
+  {
+   "address": "0x80015b60",
+   "instruction": "b",
+   "target": "eq_bits_hook",
+   "site": "zone_editor_bit_control_primary_callback"
+  },
+  {
+   "address": "0x80020bec",
+   "instruction": "b",
+   "target": "eq_render_hook",
+   "site": "ui_render_channel_bits_aliasing_page"
+  },
+  {
+   "address": "0x8003338c",
+   "instruction": "b",
+   "target": "eq_knob_hook",
+   "site": "zone_editor_bit_parameter_set_normalized"
+  },
+  {
+   "address": "0x8001576c",
+   "instruction": "b",
+   "target": "phase_panel_entry",
+   "site": "zone_operation_panel_primary_callback"
+  },
+  {
+   "address": "0x80022844",
+   "instruction": "b",
+   "target": "phase_panel_render",
+   "site": "ui_render_channel_phase_modulation_page"
+  },
+  {
+   "address": "0x80034060",
+   "instruction": "b",
+   "target": "phase_knob_hook",
+   "site": "zone_editor_phase_modulation_parameter_set_normalized"
+  },
+  {
+   "address": "0x800565ec",
+   "instruction": "b",
+   "target": "preset_extras_parse_file",
+   "site": "preset_yaml_parse_open_file"
+  },
+  {
+   "address": "0x800571e8",
+   "instruction": "b",
+   "target": "preset_extras_parse_field",
+   "site": "preset_yaml_parse_field"
+  },
+  {
+   "address": "0x80002c0c",
+   "instruction": "b",
+   "target": "extras_folder_hook",
+   "site": "preset_library_load_yaml_folder"
+  },
+  {
+   "address": "0x8004c9e4",
+   "instruction": "b",
+   "target": "extras_load_hook",
+   "site": "preset_load_library_index_into_working_model"
+  },
+  {
+   "address": "0x8004d13c",
+   "instruction": "b",
+   "target": "preset_extras_save",
+   "site": "preset_save_library_index_schedule_yaml_write"
+  },
+  {
+   "address": "0x8004d26c",
+   "instruction": "b",
+   "target": "preset_extras_erase",
+   "site": "preset_erase_library_index_schedule_yaml_delete"
+  },
+  {
+   "address": "0x80055b38",
+   "instruction": "b",
+   "target": "preset_extras_write",
+   "site": "preset_yaml_write_file"
+  },
+  {
+   "address": "0x8004c694",
+   "instruction": "b",
+   "target": "preset_extras_differs",
+   "site": "preset_working_model_differs_from_library"
+  },
+  {
+   "address": "0x800358a8",
+   "instruction": "b",
+   "target": "eq_channel_select_hook",
+   "site": "zone_editor_select_channel_and_refresh_value"
+  },
+  {
+   "address": "0x80035b48",
+   "instruction": "b",
+   "target": "eq_channel_button_hook",
+   "site": "front_panel_channel_button_press"
+  },
+  {
+   "address": "0x8004025c",
+   "instruction": "b",
+   "target": "patch_preferences_ui",
+   "site": "preferences_ui"
+  },
+  {
+   "address": "0x8005bf34",
+   "instruction": "b",
+   "target": "preferences_load_hook",
+   "site": "preferences_yaml_load"
+  },
+  {
+   "address": "0x8005bc60",
+   "instruction": "b",
+   "target": "preferences_write_hook",
+   "site": "preferences_yaml_write"
+  },
+  {
+   "address": "0x800604ac",
+   "instruction": "b",
+   "target": "patch_disk_read",
+   "site": "fatfs_disk_read"
+  },
+  {
+   "address": "0x80001418",
+   "instruction": "b",
+   "target": "patch_grain_capture_steps",
+   "site": "audio_advance_channel_playheads"
+  },
+  {
+   "address": "0x800011e4",
+   "instruction": "b",
+   "target": "patch_resample_frame",
+   "site": "audio_capture_48khz_frame"
+  },
+  {
+   "address": "0x800018d0",
+   "instruction": "b",
+   "target": "patch_audio_convolve_channel_0",
+   "site": "audio_convolve_channel_0"
+  },
+  {
+   "address": "0x800023c4",
+   "instruction": "b",
+   "target": "patch_channel_eq",
+   "site": "audio_per_channel_eq_insertion_point"
+  },
+  {
+   "address": "0x8006514c",
+   "instruction": "bl",
+   "target": "patch_startup",
+   "site": "call of uart0_module_clock_and_bootstrap"
+  },
+  {
+   "address": "0x80067964",
+   "instruction": "bl",
+   "target": "patch_render",
+   "site": "call of process_mcspi_ring_frame_simd"
+  },
+  {
+   "address": "0x8006e14c",
+   "instruction": "bl",
+   "target": "patch_demangle_disabled",
+   "site": "call of __cxa_demangle"
+  },
+  {
+   "address": "0x800396d8",
+   "instruction": "bl",
+   "target": "panel_pin_read_hook",
+   "site": "call of gpio_read_input_bit"
+  },
+  {
+   "address": "0x800000fc",
+   "instruction": "b",
+   "target": "patch_reset_hook",
+   "site": "reset entry: mask INTC, trial trace"
+  },
+  {
+   "address": "0x8000029c",
+   "instruction": "bl",
+   "target": "trace_call_2",
+   "site": "trial trace: main"
+  },
+  {
+   "address": "0x80064fdc",
+   "instruction": "bl",
+   "target": "trace_call_3",
+   "site": "trial trace: mmu_prepare"
+  },
+  {
+   "address": "0x80065008",
+   "instruction": "bl",
+   "target": "trace_call_4",
+   "site": "trial trace: mmu_enable"
+  },
+  {
+   "address": "0x80065010",
+   "instruction": "bl",
+   "target": "trace_call_5",
+   "site": "trial trace: cache_enable"
+  },
+  {
+   "address": "0x80065014",
+   "instruction": "bl",
+   "target": "trace_call_6",
+   "site": "trial trace: engine_memory"
+  },
+  {
+   "address": "0x80065018",
+   "instruction": "bl",
+   "target": "trace_call_7",
+   "site": "trial trace: timers"
+  },
+  {
+   "address": "0x8006501c",
+   "instruction": "bl",
+   "target": "trace_call_8",
+   "site": "trial trace: board_gpio"
+  },
+  {
+   "address": "0x80065020",
+   "instruction": "bl",
+   "target": "trace_call_9",
+   "site": "trial trace: gpmc"
+  },
+  {
+   "address": "0x80065024",
+   "instruction": "bl",
+   "target": "trace_call_10",
+   "site": "trial trace: mcspi_boot"
+  },
+  {
+   "address": "0x80065054",
+   "instruction": "bl",
+   "target": "trace_call_11",
+   "site": "trial trace: mcasp0_setup"
+  },
+  {
+   "address": "0x80065084",
+   "instruction": "bl",
+   "target": "trace_call_12",
+   "site": "trial trace: mcasp1_bringup"
+  },
+  {
+   "address": "0x80065088",
+   "instruction": "bl",
+   "target": "trace_call_13",
+   "site": "trial trace: mcspi_enable"
+  },
+  {
+   "address": "0x8006508c",
+   "instruction": "bl",
+   "target": "trace_call_14",
+   "site": "trial trace: mcasp0_start"
+  },
+  {
+   "address": "0x80065090",
+   "instruction": "bl",
+   "target": "trace_call_15",
+   "site": "trial trace: mcasp1_release"
+  },
+  {
+   "address": "0x80065094",
+   "instruction": "bl",
+   "target": "trace_call_16",
+   "site": "trial trace: irq_enable"
+  },
+  {
+   "address": "0x800650c4",
+   "instruction": "bl",
+   "target": "trace_call_17",
+   "site": "trial trace: tscadc"
+  },
+  {
+   "address": "0x800650f4",
+   "instruction": "bl",
+   "target": "trace_call_18",
+   "site": "trial trace: mmchs"
+  },
+  {
+   "address": "0x80065108",
+   "instruction": "bl",
+   "target": "trace_call_19",
+   "site": "trial trace: mount_boot"
+  },
+  {
+   "address": "0x8006511c",
+   "instruction": "bl",
+   "target": "trace_call_20",
+   "site": "trial trace: mount_panel"
+  },
+  {
+   "address": "0x8006562c",
+   "instruction": "bl",
+   "target": "trace_call_23",
+   "site": "trial trace: oled"
+  },
+  {
+   "address": "0x80065630",
+   "instruction": "bl",
+   "target": "trace_call_24",
+   "site": "trial trace: oled_dma"
+  },
+  {
+   "address": "0x80065634",
+   "instruction": "bl",
+   "target": "trace_call_25",
+   "site": "trial trace: late_startup"
+  },
+  {
+   "address": "0x80065638",
+   "instruction": "bl",
+   "target": "trace_call_26",
+   "site": "trial trace: foreground_loop"
+  },
+  {
+   "address": "0x8006af1c",
+   "instruction": "bl",
+   "target": "trace_call_29",
+   "site": "trial trace: timer_clocks"
+  },
+  {
+   "address": "0x8006af20",
+   "instruction": "bl",
+   "target": "trace_call_30",
+   "site": "trial trace: timer_irq_enable"
+  },
+  {
+   "address": "0x8006af24",
+   "instruction": "bl",
+   "target": "trace_call_31",
+   "site": "trial trace: timer_intc_reset"
+  },
+  {
+   "address": "0x8006af34",
+   "instruction": "bl",
+   "target": "trace_call_32",
+   "site": "trial trace: timer2_handler"
+  },
+  {
+   "address": "0x8006af44",
+   "instruction": "bl",
+   "target": "trace_call_33",
+   "site": "trial trace: timer2_route"
+  },
+  {
+   "address": "0x8006af4c",
+   "instruction": "bl",
+   "target": "trace_call_34",
+   "site": "trial trace: timer2_unmask"
+  },
+  {
+   "address": "0x8006af5c",
+   "instruction": "bl",
+   "target": "trace_call_35",
+   "site": "trial trace: timer3_handler"
+  },
+  {
+   "address": "0x8006af6c",
+   "instruction": "bl",
+   "target": "trace_call_36",
+   "site": "trial trace: timer3_route"
+  },
+  {
+   "address": "0x8006af74",
+   "instruction": "bl",
+   "target": "trace_call_37",
+   "site": "trial trace: timer3_unmask"
+  },
+  {
+   "address": "0x8002d2e4",
+   "instruction": "beq",
+   "target": "patch_foreground_hook",
+   "site": "completed foreground pass"
+  }
+ ],
+ "splices": [
+  {
+   "target": "patch_audio_convolve_channel_0",
+   "end": "patch_audio_convolve_end",
+   "parts": [
+    {
+     "stock": [
+      "0x800018d0",
+      48
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x80001900",
+      196
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x800019c4",
+      196
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x80001a88",
+      192
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x80001b48",
+      216
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x80001c20",
+      192
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x80001ce0",
+      196
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x80001da4",
+      192
+     ]
+    },
+    {
+     "insert": "preload"
+    },
+    {
+     "stock": [
+      "0x80001e64",
+      184
+     ]
+    }
+   ]
+  }
+ ]
+}
