@@ -29,18 +29,6 @@ downloaded HTML file in a current browser.
 
 To go back, load Rossum's own `app` with **Utilities > Load Software**.
 
-### CLI alternative
-
-Download `assimil8or.a8patch` from the
-[latest release](https://github.com/brandon-tallent/assimil8or-extended-firmware/releases/latest)
-and run this command from a copy of this repository:
-
-```sh
-python3 patcher.py /path/to/app-v304-260610.zip assimil8or.a8patch -o card
-```
-
-It writes `card/app` and `card/ext-….bin`.
-
 ## Writing an editor
 
 [PROTOCOL.md](PROTOCOL.md) is the complete MIDI System Exclusive protocol, with a
@@ -50,8 +38,8 @@ including the lines this firmware adds.
 ## Building from source
 
 - Install the [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
-  (`arm-none-eabi-gcc`). Releases are built with GCC 16.1.0; another version makes a
-  working patch with a build ID of its own.
+  (`arm-none-eabi-gcc`). The published patcher is built with GCC 16.1.0; another version
+  makes a working patch with a build ID of its own.
 
 ```sh
 make
@@ -64,11 +52,14 @@ Apply the patch to Rossum's download with both patchers and compare them:
 A8_STOCK_APP=/path/to/app-v304-260610.zip make check
 ```
 
-Build the release patch and the browser patcher:
+Build the patcher page:
 
 ```sh
 A8_STOCK_APP=/path/to/app-v304-260610.zip make release
 ```
+
+This writes `dist/assimil8or-patcher.html`, the patcher page with your build
+inside it. Open it in a browser and use it as above.
 
 ## File layout
 
