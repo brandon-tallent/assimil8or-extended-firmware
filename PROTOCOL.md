@@ -457,10 +457,11 @@ Stereo/Right partner. The zone byte is unused.
 | 164 | Detune | 0…1,200 cents |
 | 165 | Octave: share of grains an octave up | 0…100 % |
 | 166 | Reverse: share of grains played backwards | 0…100 % |
-| 167 | Pan spread (a stereo pair only) | 0…100 % |
+| 167 | Pan: widest spread, reached as grains grow random (a stereo pair only) | 0…100 % |
 | 168 | Shape: share of a grain spent fading | 1…100 % |
 | 169 | Scan: speed through the sample against the voice | −400…400 % |
 | 177 | Slide: added to the start | −1000…1000, 0.1 % of the zone |
+| 195 | Skew: Shape's fading split between attack (+) and release (−) | −100…100 |
 | 178 + 2n | Route n's CV source | −4…23 |
 | 179 + 2n | Route n's CV amount | −100…100 |
 
@@ -473,7 +474,7 @@ Three more IDs only read. Send them with any value.
 
 | ID | Reply in place of the stored value |
 | ---: | --- |
-| 170 | Engine state: u8 channel (`FF` off), u8 stereo pair, u8 grains sounding, u8 the voice's zone; u32 grains started, u32 skipped, u32 dropped; s32 pitch step (frames per frame, Q25), u32 playhead frame, u32 the zone's first frame, u32 its frames; then parameters 161–169 and 177 as s16 |
+| 170 | Engine state: u8 channel (`FF` off), u8 stereo pair, u8 grains sounding, u8 the voice's zone; u32 grains started, u32 skipped, u32 stolen (cut short to make room); s32 pitch step (frames per frame, Q25), u32 playhead frame, u32 the zone's first frame, u32 its frames; then parameters 161–169, 177 and 195 as s16 |
 | 171 | What is sounding, for a display: u8 channel (`FF` off), u8 zone, u16 zero, u32 the frame grains start at (`FFFFFFFF` while the voice is silent), then eight u32 grains: bits 0–26 the sample frame, 27–29 the window level in eighths, bit 30 backwards, bit 31 sounding |
 | 194 | The routes: eight pairs of s8 source, s8 amount |
 
@@ -535,7 +536,7 @@ lowest value: the n-th step above its minimum. The newest value of each
 parameter waits in a table of sixteen and is stored between other jobs. It
 takes channel parameters 0–47, 49 and 50 (Attack and Release to 6.5 s), a
 zone's pitch offset, level offset and minimum voltage, the EQ's CV sources
-and amounts (on the channel's EQ), and grain parameters 160–169 and 177.
+and amounts (on the channel's EQ), and grain parameters 160–169, 177 and 195.
 Sample positions, Side, Channel mode and Mute/Solo are not automated.
 
 **2D EQ automate.** Sets one field of a channel's EQ at once, without

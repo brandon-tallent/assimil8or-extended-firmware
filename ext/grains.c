@@ -11,6 +11,10 @@
  * Bits, EQ, pan and mix all apply. Scan is how fast the start moves through
  * the zone against the voice: 100 follows the playhead, 0 holds where the
  * note began, and anything between stretches time at the voice's pitch.
+ * Shape and Skew make each grain's window; on a pair the grains spread
+ * across the stereo field as they grow more random. With every grain
+ * sounding, a new one takes the one nearest its end and the next nearest
+ * fades out ahead of the grain after.
  *
  * The settings are a preset's and live in the overlay (patch_grain). Eight
  * of the fields have a CV route; the foreground adds each route's CV to its
@@ -33,18 +37,34 @@
 #define ONE_Q15                (1 << 15)
 #define INTERVAL_SHIFT         8u          /* grain interval: Q8 frames */
 #define SAMPLE_SHIFT           4u          /* Q31 PCM to Q27: room for the cubic and eight grains */
-#define EDGE_SHIFT             12u         /* window edge arithmetic: Q20 of the grain */
-#define EDGE_PER_PERCENT       21474836u   /* 2^31 / 100: Shape 100% fades half the grain each side */
-/* The mean square of the window, over SQUARE_UNITS: full outside the fades,
- * 13/35 within them (the smooth fade's mean square). */
-#define SQUARE_UNITS           35u
-#define SQUARE_FADE_LOSS       22u
-#define POWER_RATIO_SHIFT      12u         /* 1 / power as Q12, so its root is Q16 after 20 more bits */
+#define EDGE_SHIFT             12u         /* window fade arithmetic: Q20 of the grain */
+#define WHOLE_GRAIN            (1ull << 32) /* a grain's phase, end to end */
+/* The window (after Mutable Instruments Beads' grain envelope, MIT): Shape
+ * is the share of the grain spent fading, Skew splits it between the
+ * attack and the release. At Skew 0 both fades are smooth; toward either
+ * end the attack turns linear and the release a fourth-power tail, so
+ * -100 is a struck decay and +100 a swell that cuts off. Each fade has a
+ * floor so a short grain does not click, longer for a sharp tail. */
+#define SKEW_FULL              100
+#define ATTACK_MIN_FRAMES      24u         /* 0.5 ms */
+#define RELEASE_MIN_FRAMES     24u         /* 0.5 ms, a smooth release */
+#define RELEASE_SHARP_FRAMES   480u        /* 10 ms, a fourth-power release */
+#define SMOOTH_ONE             (1 << 15)   /* Q15: all smooth fade */
+/* Grains stolen to make room fade out over at most this, and by the next grain. */
+#define STEAL_FADE_FRAMES      240u        /* 5 ms */
 #define RATE_MIN               (1 << 10)   /* below this the voice is not moving */
 #define RATE_MAX               (1 << 29)   /* 16 frames per frame */
 #define SPAN_MARGIN            4u          /* frames the cubic reads around a grain */
 #define DRIFT_REWRAP_LIMIT     4u          /* zone lengths of Scan drift folded by subtraction */
 #define DETUNES                16u
+/* Pan spread widens with the grains' randomness (after Beads): Spray
+ * against the grain's length, Detune against an octave, and Octave and
+ * Reverse by how evenly they split the grains; their sum, at most one,
+ * times half the grains sounding is the spread. Pans gather toward the
+ * middle. A panned grain keeps its near side and crosses the far side's
+ * signal over at about equal power. */
+#define DETUNE_SCATTER_CENTS   1200
+#define FRACTION_ONE_Q16       (1u << 16)
 #define RANDOM_SEED            0x2545f491u
 /* The stock voice (ext.h): a silent one reads as parked; the zone it plays
  * is in the low bits of its selector word. */
@@ -86,6 +106,7 @@ struct range {
 };
 struct ranges { struct range zone[ZONES]; u32 pair; };
 
+struct fades { u32 attack, attack_inverse, release, release_inverse, smooth; };
 struct grain {
     const s32 *pcm;
     s32 right;
@@ -93,8 +114,9 @@ struct grain {
     s64 position;       /* Q32 frames from pcm */
     s32 step;           /* Q25 frames per output frame; negative backwards */
     u32 phase, phase_step; /* Q32 across the grain; a zero step is a free grain */
-    u32 edge, edge_inverse; /* its window's fades, as they were when it started */
-    s32 gain[2];        /* Q15 */
+    struct fades fades; /* its window, as it was when it started */
+    u32 fade, fade_step; /* Q30 level while stolen; a zero step is not stolen */
+    s32 gain[2][2];     /* Q15, [out][in]: left and right from left and right */
 };
 
 /* The fields the engine plays: the settings with each route's CV added. */
@@ -105,7 +127,9 @@ static struct { volatile u32 waiting; u32 channel, field; s32 value; } request;
 static struct ranges tables[2];
 static volatile u32 live;
 static struct tuning {
-    u32 frames, phase_step, interval, edge, edge_inverse, norm, spray, octave, reverse;
+    u32 frames, phase_step, interval, norm, spray, octave, reverse;
+    struct fades fades;
+    u32 scatter;        /* Q16, at most one: the share of the grains' randomness */
     s32 pan, scan, backwards;
     s32 slide; /* Q16 share of the zone, either way */
     u32 detune[DETUNES]; /* Q16 pitch ratios across the spread */
@@ -115,7 +139,7 @@ static struct grain grains[GRAINS];
 static s32 countdown, norm;
 static s64 drift;
 static u32 heard; /* the playhead's place in its zone a frame ago */
-static u32 seed, spawned, skipped, dropped;
+static u32 seed, spawned, skipped, stolen;
 
 /* 2^(cents/1200) as Q16, within an octave either way. */
 u32 grain_ratio_q16(s32 cents)
@@ -137,37 +161,90 @@ static u32 root(u32 x)
     return r;
 }
 
+/* The reciprocal that turns a phase within a fade into Q30 of it. */
+static u32 inverse(u32 reach)
+{
+    u32 r = reach >> EDGE_SHIFT;
+    return ONE_Q30 / (r ? r : 1u);
+}
+
+/* The window's fades as phases: Shape's share of the grain, split by Skew,
+ * each at least its floor; a grain shorter than its floors is all fade. */
+static struct fades fades_for(u32 phase_step, u32 shape, s32 skew)
+{
+    struct fades f;
+    u32 sharp = (u32)(skew < 0 ? -skew : skew);
+    u64 fading = WHOLE_GRAIN * shape / PERCENT;
+    u64 attack = fading * (u32)(SKEW_FULL + skew) / (2 * SKEW_FULL), release = fading - attack;
+    u64 attack_min = (u64)ATTACK_MIN_FRAMES * phase_step;
+    u64 release_min = (u64)(RELEASE_MIN_FRAMES + (RELEASE_SHARP_FRAMES - RELEASE_MIN_FRAMES) * sharp / SKEW_FULL) * phase_step;
+    if (attack < attack_min) attack = attack_min;
+    if (release < release_min) release = release_min;
+    if (attack + release >= WHOLE_GRAIN) {
+        /* Each fade keeps its smooth floor, or half a grain shorter than two. */
+        u64 sum = attack + release, half = WHOLE_GRAIN / 2u;
+        u64 attack_keep = attack_min < half ? attack_min : half;
+        u64 release_keep = (u64)RELEASE_MIN_FRAMES * phase_step;
+        if (release_keep > half) release_keep = half;
+        attack = attack * (WHOLE_GRAIN - 1u) / sum;
+        if (attack < attack_keep) attack = attack_keep;
+        if (WHOLE_GRAIN - 1u - attack < release_keep) attack = WHOLE_GRAIN - 1u - release_keep;
+        release = WHOLE_GRAIN - 1u - attack;
+    }
+    f.attack = (u32)attack; f.attack_inverse = inverse(f.attack);
+    f.release = (u32)release; f.release_inverse = inverse(f.release);
+    f.smooth = (u32)(SKEW_FULL - (s32)sharp) * SMOOTH_ONE / SKEW_FULL;
+    return f;
+}
+
+/* The window's mean and mean square, Q16 of a grain at full level, for the
+ * output gain: full between the fades, and each fade blends its base curve
+ * with the smooth one by s. Attack t: mean 1/2, mean square 1/3 + s/30 +
+ * s^2/210. Release t^4: mean 1/5 + 3s/10, mean square 1/9 + 17s/126 +
+ * 79s^2/630. */
+static void window_moments(const struct fades *f, u32 *mean, u32 *square)
+{
+    u32 a = f->attack >> 16, r = f->release >> 16, s = f->smooth << 1, s2 = (u32)(((u64)s * s) >> 16);
+    u32 flat = FRACTION_ONE_Q16 - a - r;
+    u32 release_mean = FRACTION_ONE_Q16 / 5u + 3u * s / 10u;
+    u32 attack_square = FRACTION_ONE_Q16 / 3u + s / 30u + s2 / 210u;
+    u32 release_square = FRACTION_ONE_Q16 / 9u + 17u * s / 126u + 79u * s2 / 630u;
+    *mean = flat + a / 2u + (u32)(((u64)r * release_mean) >> 16);
+    *square = flat + (u32)(((u64)a * attack_square) >> 16) + (u32)(((u64)r * release_square) >> 16);
+}
+
+/* How even a percent's split of the grains is, Q16: 4p(1 - p). */
+static u32 split(u32 percent) { return 4u * percent * (PERCENT - percent) * FRACTION_ONE_Q16 / (PERCENT * PERCENT); }
+
 /* The per-frame values of the fields, handed to the IRQ whole. */
 static void derive(void)
 {
     struct tuning next;
     u32 frames = (u32)values[GRAIN_SIZE] * OUTPUT_FRAMES_PER_MS / TENTHS_PER_MS;
-    u32 overlap = (u32)values[GRAIN_OVERLAP], shape = (u32)values[GRAIN_SHAPE];
+    u32 overlap = (u32)values[GRAIN_OVERLAP];
     next.frames = frames;
     next.phase_step = ~0u / frames;
     next.interval = (frames << INTERVAL_SHIFT) * PERCENT / overlap;
-    next.edge = shape * EDGE_PER_PERCENT;
-    next.edge_inverse = ONE_Q30 / (next.edge >> EDGE_SHIFT);
-    /* Grains that line up add in amplitude: overlap x the window's mean,
-     * 1 - shape/2. Grains that read different sound add in power: overlap x
-     * the window's mean square. Each is brought back to the voice's level. */
-    u32 cover = overlap * (2 * PERCENT - shape) * (ONE_Q16 >> 4) / (2 * PERCENT * PERCENT >> 4);
-    u32 unity = SQUARE_UNITS * PERCENT * PERCENT;
-    u32 power = overlap * (SQUARE_UNITS * PERCENT - SQUARE_FADE_LOSS * shape);
-    if (tables[live].pair) {
-        /* Pan turns one side of a grain down by up to the spread: a side's
-         * mean gain is 1 - pan/4 and its mean square 1 - pan/2 + pan^2/6. */
-        u32 pan = (u32)values[GRAIN_PAN];
-        cover = cover * (4 * PERCENT - pan) / (4 * PERCENT);
-        power = power * ((6 * PERCENT * PERCENT - 3 * PERCENT * pan + pan * pan) / (6 * PERCENT)) / PERCENT;
-    }
+    next.fades = fades_for(next.phase_step, (u32)values[GRAIN_SHAPE], values[GRAIN_SKEW]);
+    /* Grains that line up add in amplitude: overlap x the window's mean.
+     * Grains that read different sound add in power: overlap x its mean
+     * square. Each is brought back to the voice's level. A pair's pans keep
+     * about equal power, and grains that line up are never panned. */
+    u32 mean, square;
+    window_moments(&next.fades, &mean, &square);
+    u32 cover = overlap * mean / PERCENT, power = overlap * square / PERCENT;
     int scattered = values[GRAIN_SPRAY] || values[GRAIN_DETUNE] || values[GRAIN_OCTAVE] ||
                     values[GRAIN_REVERSE] || values[GRAIN_SCAN] != SCAN_FOLLOW;
-    if (scattered) next.norm = power <= unity ? ONE_Q16 : root((unity << POWER_RATIO_SHIFT) / power << (32u - POWER_RATIO_SHIFT));
+    if (scattered) next.norm = power <= FRACTION_ONE_Q16 ? ONE_Q16 : (1u << 24) / root(power);
     else next.norm = cover <= ONE_Q16 ? ONE_Q16 : ~0u / cover;
     next.spray = (u32)values[GRAIN_SPRAY] * OUTPUT_FRAMES_PER_MS;
     next.octave = (u32)values[GRAIN_OCTAVE] * 256u / PERCENT;
     next.reverse = (u32)values[GRAIN_REVERSE] * 256u / PERCENT;
+    u64 spray_share = (u64)next.spray * FRACTION_ONE_Q16 / frames;
+    u64 scatter = (spray_share < FRACTION_ONE_Q16 ? spray_share : FRACTION_ONE_Q16) +
+                  (u32)values[GRAIN_DETUNE] * FRACTION_ONE_Q16 / DETUNE_SCATTER_CENTS +
+                  split((u32)values[GRAIN_OCTAVE]) + split((u32)values[GRAIN_REVERSE]);
+    next.scatter = scatter < FRACTION_ONE_Q16 ? (u32)scatter : FRACTION_ONE_Q16;
     next.pan = values[GRAIN_PAN] * ONE_Q15 / (s32)PERCENT;
     next.backwards = values[GRAIN_SCAN] < 0;
     next.slide = values[GRAIN_SLIDE] * (s32)ONE_Q16 / SLIDE_WHOLE;
@@ -233,7 +310,19 @@ static u32 random(void)
     return seed;
 }
 
-static void spawn(struct grain *g, u32 channel, s32 step)
+/* A pan's gains for a pair, Q15 [out][in]: the near side keeps its own
+ * signal and takes the far side's at 1 - (1 - |d|)^2; the far side keeps
+ * 1 - d^2 of its own. */
+static void pan_gains(s32 gain[2][2], s32 d)
+{
+    s32 m = d < 0 ? -d : d, far = ONE_Q15 - (s32)(((s64)m * m) >> 15), cross = ONE_Q15 - (s32)(((s64)(ONE_Q15 - m) * (ONE_Q15 - m)) >> 15);
+    u32 near = d < 0 ? 0u : 1u;
+    gain[near][near] = ONE_Q15; gain[near][near ^ 1u] = d ? cross : 0;
+    gain[near ^ 1u][near ^ 1u] = d ? far : ONE_Q15; gain[near ^ 1u][near] = 0;
+}
+
+/* `due` is how long ago the grain should have started, Q8 frames. */
+static void spawn(struct grain *g, u32 channel, s32 step, u32 sounding, u32 due)
 {
     const struct range *r = &tables[live].zone[REG32(ZONE_SELECTOR_BASE + channel * ZONE_SELECTOR_STRIDE) & ZONE_SELECTOR_MASK];
     u32 at = playhead(channel) - r->first;
@@ -267,12 +356,18 @@ static void spawn(struct grain *g, u32 channel, s32 step)
         g->position = (s64)start << 32;
         g->step = rate;
     }
-    s32 pan = ((s32)(chance >> 24) - 128) * tuning.pan / 128;
-    g->gain[0] = pan > 0 ? ONE_Q15 - pan : ONE_Q15;
-    g->gain[1] = pan < 0 ? ONE_Q15 + pan : ONE_Q15;
-    g->phase = 0;
+    /* The spread is the grains' randomness times half of them sounding,
+     * this one counted; a second random draw gathers pans to the middle. */
+    u32 pick = random(), spread = (sounding + 1u) * tuning.scatter / 2u;
+    u32 reach = (u32)(((u64)spread * (pick >> 16)) >> 16);
+    if (reach > FRACTION_ONE_Q16) reach = FRACTION_ONE_Q16;
+    s32 d = (s32)((((s64)((s32)(pick & 0xffffu) - ONE_Q15) * (s32)reach) >> 16) * tuning.pan >> 15);
+    pan_gains(g->gain, d);
+    g->position += ((s64)g->step << (32u - AUDIO_STEP_SHIFT)) * due >> INTERVAL_SHIFT;
     g->phase_step = tuning.phase_step;
-    g->edge = tuning.edge; g->edge_inverse = tuning.edge_inverse;
+    g->phase = (g->phase_step >> INTERVAL_SHIFT) * due;
+    g->fades = tuning.fades;
+    g->fade = ONE_Q30; g->fade_step = 0;
     ++spawned;
 }
 
@@ -288,20 +383,28 @@ static inline s32 interpolate(const s32 *p, u32 f)
     return mul31(mul31(mul31(c3, f) + c2, f) + c1, f) + b;
 }
 
-/* The grain's window at its phase, Q30: full between two smooth fades. */
+/* The grain's window at its phase, Q30: full between its fades. The attack
+ * blends a line, the release a fourth power, with the smooth fade. */
 static inline u32 window(const struct grain *g)
 {
-    u32 phase = g->phase, edge_distance = phase < 0x80000000u ? phase : ~phase;
-    if (edge_distance >= g->edge) return ONE_Q30;
-    u32 x = (edge_distance >> EDGE_SHIFT) * g->edge_inverse;
+    const struct fades *f = &g->fades;
+    u32 phase = g->phase, to_end = ~phase, x, base;
+    if (phase < f->attack) base = x = (phase >> EDGE_SHIFT) * f->attack_inverse;
+    else if (to_end < f->release) {
+        x = (to_end >> EDGE_SHIFT) * f->release_inverse;
+        u32 square = (u32)(((u64)x * x) >> 30);
+        base = (u32)(((u64)square * square) >> 30);
+    } else return g->fade;
     u32 square = (u32)(((u64)x * x) >> 30);
-    return (u32)(((u64)square * (3u * ONE_Q30 - 2u * x)) >> 30);
+    u32 smooth = (u32)(((u64)square * (3u * ONE_Q30 - 2u * x)) >> 30);
+    u32 w = base + (u32)((((s64)smooth - (s64)base) * (s32)f->smooth) >> 15);
+    return g->fade_step ? (u32)(((u64)w * g->fade) >> 30) : w;
 }
 
 /* The Q27 grain sum at unity, as a saturated Q31 sample. */
-static s32 output(s32 sum)
+static s32 output(s64 sum)
 {
-    s64 wide = ((s64)sum * norm) >> (16u - SAMPLE_SHIFT);
+    s64 wide = (sum * norm) >> (16u - SAMPLE_SHIFT);
     return wide > 0x7fffffff ? 0x7fffffff : wide < -0x7fffffff - 1 ? -0x7fffffff - 1 : (s32)wide;
 }
 
@@ -329,14 +432,36 @@ static void render(s32 *mix, const s32 *steps)
     heard = at;
     countdown -= 1 << INTERVAL_SHIFT;
     if (countdown <= 0) {
-        struct grain *free_grain = 0;
-        for (u32 n = 0; n < GRAINS && !free_grain; ++n) if (!grains[n].phase_step) free_grain = &grains[n];
-        /* With every grain busy the next one waits for the first to end. */
-        if (free_grain) { countdown += (s32)tuning.interval; spawn(free_grain, channel, steps[channel]); }
-        else { countdown = 0; ++dropped; }
+        /* A free grain, or else the one nearest its end; then, with none
+         * left free, the next nearest fades out in time for the next grain. */
+        struct grain *taken = 0, *oldest = 0;
+        u32 sounding = 0;
+        for (u32 n = 0; n < GRAINS; ++n) {
+            struct grain *g = &grains[n];
+            if (!g->phase_step) { if (!taken) taken = g; continue; }
+            ++sounding;
+            if (!oldest || g->phase > oldest->phase) oldest = g;
+        }
+        if (!taken) { taken = oldest; --sounding; ++stolen; }
+        u32 due = (u32)-countdown;
+        countdown += (s32)tuning.interval;
+        spawn(taken, channel, steps[channel], sounding, due);
+        if (taken->phase_step && sounding + 1u >= GRAINS) {
+            struct grain *next_out = 0;
+            for (u32 n = 0; n < GRAINS; ++n) {
+                struct grain *g = &grains[n];
+                if (g != taken && g->phase_step && !g->fade_step && (!next_out || g->phase > next_out->phase)) next_out = g;
+            }
+            u32 fade = tuning.interval >> INTERVAL_SHIFT;
+            if (fade > STEAL_FADE_FRAMES) fade = STEAL_FADE_FRAMES;
+            if (next_out && ~next_out->phase / next_out->phase_step > fade) {
+                next_out->fade_step = ONE_Q30 / (fade ? fade : 1u);
+                ++stolen;
+            }
+        }
     }
     u32 pair = tables[live].pair;
-    s32 left = 0, right = 0;
+    s64 left = 0, right = 0;
     for (u32 n = 0; n < GRAINS; ++n) {
         struct grain *g = &grains[n];
         if (!g->phase_step) continue;
@@ -347,13 +472,17 @@ static void render(s32 *mix, const s32 *steps)
         if (!pair) left += sample;
         else {
             s32 other = g->right ? (s32)(((s64)interpolate(p + g->right, f) * (s32)w) >> 30) : sample;
-            left += (s32)(((s64)sample * g->gain[0]) >> 15);
-            right += (s32)(((s64)other * g->gain[1]) >> 15);
+            left += ((s64)sample * g->gain[0][0] + (s64)other * g->gain[0][1]) >> 15;
+            right += ((s64)sample * g->gain[1][0] + (s64)other * g->gain[1][1]) >> 15;
         }
         g->position += (s64)g->step << (32u - AUDIO_STEP_SHIFT);
         u32 next = g->phase + g->phase_step;
         if (next < g->phase) g->phase_step = 0;
         else g->phase = next;
+        if (g->fade_step) {
+            if (g->fade <= g->fade_step) g->phase_step = 0;
+            else g->fade -= g->fade_step;
+        }
     }
     /* The output gain follows Overlap, Shape and Pan without a step. */
     norm += ((s32)tuning.norm - norm) >> NORM_GLIDE_SHIFT;
@@ -515,18 +644,19 @@ void grains_foreground(void)
  * engine's state:
  *   u8 channel (FFh off), pair, sounding grains, the voice's zone;
  *   u32 grains started, skipped (the voice not playing, or the grain
- *   longer than its zone) and dropped (frames a grain waited with all grains busy);
+ *   longer than its zone) and stolen (grains cut short to make room);
  *   s32 pitch step, u32 playhead frame, u32 the zone's first frame and
- *   frames; then the fields as s16, Size first.
+ *   frames; then the fields as s16, Size first and Skew last.
  * GRAIN_SET_VIEW replies what is sounding, for a display: u8 channel (FFh off),
  * u8 the voice's zone, u16 zero, u32 playhead frame, then each grain as a
  * u32: its sample frame, window level in eighths from bit 27, bit 30
  * backwards, bit 31 sounding.
  * GRAIN_SET_ROUTE and the fifteen after it set a route's source, then its
- * amount; GRAIN_SET_ROUTES replies every route's source and amount as s8. */
+ * amount; GRAIN_SET_ROUTES replies every route's source and amount as s8.
+ * GRAIN_SET_SKEW sets Skew. */
 u32 grain_set(u32 channel, u32 field, s32 value, u8 *out, u32 *count)
 {
-    if (channel >= PRESET_CHANNELS || field > GRAIN_SET_ROUTES ||
+    if (channel >= PRESET_CHANNELS || field > GRAIN_SET_SKEW ||
         (field > GRAIN_SET_VIEW && field < GRAIN_SET_SLIDE)) return BAD_RANGE;
     if (field == GRAIN_SET_ROUTES) {
         for (u32 r = 0; r < GRAIN_ROUTES; ++r) { out[2*r] = (u8)patch_grain.source[r]; out[2*r + 1] = (u8)patch_grain.amount[r]; }
@@ -564,7 +694,7 @@ u32 grain_set(u32 channel, u32 field, s32 value, u8 *out, u32 *count)
         const struct ranges *t = &tables[live];
         u32 zone = REG32(ZONE_SELECTOR_BASE + at * ZONE_SELECTOR_STRIDE) & ZONE_SELECTOR_MASK;
         out[0] = (u8)grain_channel; out[1] = (u8)(on && t->pair); out[2] = (u8)sounding; out[3] = (u8)zone;
-        put_u32(out + 4, spawned); put_u32(out + 8, skipped); put_u32(out + 12, dropped);
+        put_u32(out + 4, spawned); put_u32(out + 8, skipped); put_u32(out + 12, stolen);
         put_u32(out + 16, (u32)patch_grain_steps[at]);
         put_u32(out + 20, REG32(PLAYHEAD_FRAME_BASE + at * PLAYHEAD_FRAME_STRIDE));
         put_u32(out + 24, on ? t->zone[zone].first : 0); put_u32(out + 28, on ? t->zone[zone].frames : 0);
@@ -573,6 +703,7 @@ u32 grain_set(u32 channel, u32 field, s32 value, u8 *out, u32 *count)
         return OK;
     }
     if (field == GRAIN_SET_SLIDE) field = GRAIN_SLIDE;
+    else if (field == GRAIN_SET_SKEW) field = GRAIN_SKEW;
     else if (field >= GRAIN_SET_ROUTE) field += GRAIN_REQUEST_ROUTE - GRAIN_SET_ROUTE;
     u32 status = store(channel, field, value);
     if (status != OK) return status;
@@ -583,7 +714,7 @@ u32 grain_set(u32 channel, u32 field, s32 value, u8 *out, u32 *count)
 
 void grains_init(void)
 {
-    spawned = skipped = dropped = 0;
+    spawned = skipped = stolen = 0;
     request.waiting = 0;
     adopt();
     patch_panel_page = &grain_page;

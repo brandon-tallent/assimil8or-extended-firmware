@@ -16,7 +16,7 @@
  *   EQCV<c> : source amount for Low frequency, Low gain, Mid frequency,
  *             Mid gain, High frequency, High gain and HPF
  *   EQ<c>Z<z>, EQCV<c>Z<z> : the same for a zone with its own EQ
- *   Grain : channel size overlap spray detune octave reverse pan shape scan slide
+ *   Grain : channel size overlap spray detune octave reverse pan shape scan slide skew
  *   GrainCV : source amount for each route
  *
  * Channels and zones count from 1 and Grain's channel 0 is off. Values are
@@ -64,6 +64,7 @@ const struct grain_range grain_ranges[GRAIN_FIELDS] = {
     {1, 100, 100},      /* shape: percent of the grain spent fading */
     {-400, 400, 100},   /* scan, percent of the voice's speed */
     {-1000, 1000, 0},   /* slide, tenths of a percent of the zone added to the start */
+    {-100, 100, 0},     /* skew: -100 all release (Decay), +100 all attack (Reverse) */
 };
 
 static void defaults(struct extras *e)

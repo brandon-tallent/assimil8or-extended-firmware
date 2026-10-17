@@ -326,11 +326,12 @@ static void automate_store(u32 channel, u32 zone, u32 id, u32 above)
     u8 out[REPLY_BYTES - 1]; u32 count = 0;
     struct parameter parameter;
     if (channel >= PRESET_CHANNELS) return;
-    if (id >= SET_RESAMPLE_FIRST && id != SET_GRAIN_FIRST + GRAIN_SET_SLIDE) return;
     if (id >= SET_GRAIN_FIRST) {
         u32 field = id - SET_GRAIN_FIRST;
-        if (field >= GRAIN_SET_STATUS && field != GRAIN_SET_SLIDE) return;
-        (void)grain_set(channel, field, grain_low(field == GRAIN_SET_SLIDE ? GRAIN_SLIDE : field) + (s32)above, out, &count);
+        u32 value = field == GRAIN_SET_SLIDE ? GRAIN_SLIDE : field == GRAIN_SET_SKEW ? GRAIN_SKEW :
+                    field < GRAIN_SET_STATUS ? field : GRAIN_FIELDS;
+        if (value == GRAIN_FIELDS) return; /* status, resampling and the routes */
+        (void)grain_set(channel, field, grain_low(value) + (s32)above, out, &count);
         return;
     }
     if (id >= SET_EQ_FIRST) {

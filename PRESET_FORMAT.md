@@ -19,7 +19,7 @@ Rossum's software writes.
 | `EQ<c>` | Channel c's EQ: On (0 or 1), HPF in Hz (0 Off, else 20–350), then for Low, Mid and High the frequency in Hz (20–20000), the gain in 0.1 dB (±180 for a bell, ±100 for a shelf) and the Q step (0 the band's own shape, 1–41 a bell of Q = 0.5 · 2^((q − 1) / 8)) |
 | `EQCV<c>` | Channel c's seven CV routes, a source and an amount each, for Low frequency, Low gain, Mid frequency, Mid gain, High frequency, High gain and HPF |
 | `EQ<c>Z<z>`, `EQCV<c>Z<z>` | The same for zone z of channel c when it has its own EQ. A zone without an `EQ<c>Z<z>` line follows its channel |
-| `Grain` | The grain channel (1–8, or 0 for off), then Size (0.1 ms, 5–20000), Overlap (percent, 25–800), Spray (ms, 0–2000), Detune (cents, 0–1200), Octave, Reverse and Pan (percent, 0–100), Shape (percent, 1–100), Scan (percent, ±400) and Slide (0.1 percent of the zone, ±1000) |
+| `Grain` | The grain channel (1–8, or 0 for off), then Size (0.1 ms, 5–20000), Overlap (percent, 25–800), Spray (ms, 0–2000), Detune (cents, 0–1200), Octave, Reverse and Pan (percent, 0–100), Shape (percent, 1–100), Scan (percent, ±400), Slide (0.1 percent of the zone, ±1000) and Skew (±100) |
 | `GrainCV` | Eight CV routes, a source and an amount each, for Size, Overlap, Spray, Detune, Slide, Scan, Shape and Pan |
 
 Channels and zones count from 1. A CV source is −4 for Off, −3 to −1 for
@@ -31,7 +31,7 @@ with too few numbers, is ignored; values outside their ranges are brought
 inside them. Only lines that differ from the defaults are written. The
 defaults are EQ On, HPF Off, 150 Hz, 1 kHz and 10 kHz at 0 dB with each
 band's own shape; every route Off at +1.00; and Grain
-`0 600 400 20 0 0 0 50 100 100 0`.
+`0 600 400 20 0 0 0 50 100 100 0 0`.
 
 ```yaml
 Preset 1 :
@@ -43,7 +43,7 @@ Preset 1 :
   EQ1 : 1 80 150 30 0 1000 -45 12 10000 0 0
   EQCV1 : -4 100 -4 100 0 50 -4 100 -4 100 -4 100 -4 100
   EQ1Z1 : 1 0 150 0 0 1000 0 0 8000 -60 0
-  Grain : 1 800 400 20 0 0 25 50 100 0 0
+  Grain : 1 800 400 20 0 0 25 50 100 0 0 -60
   GrainCV : -4 100 -4 100 -4 100 -4 100 5 100 -4 100 -4 100 -4 100
 ```
 

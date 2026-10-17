@@ -81,7 +81,7 @@ extern s32 patch_grain_steps[AUDIO_CHANNELS], patch_grain_mix[AUDIO_CHANNELS];
  * a preset keeps them whether or not the extension that plays them is
  * loaded; patch_grain_loaded counts the times other settings replaced them. */
 enum { GRAIN_ON, GRAIN_SIZE, GRAIN_OVERLAP, GRAIN_SPRAY, GRAIN_DETUNE, GRAIN_OCTAVE, GRAIN_REVERSE,
-       GRAIN_PAN, GRAIN_SHAPE, GRAIN_SCAN, GRAIN_SLIDE, GRAIN_FIELDS };
+       GRAIN_PAN, GRAIN_SHAPE, GRAIN_SCAN, GRAIN_SLIDE, GRAIN_SKEW, GRAIN_FIELDS };
 enum { GRAIN_ROUTE_SIZE, GRAIN_ROUTE_OVERLAP, GRAIN_ROUTE_SPRAY, GRAIN_ROUTE_DETUNE, GRAIN_ROUTE_SLIDE,
        GRAIN_ROUTE_SCAN, GRAIN_ROUTE_SHAPE, GRAIN_ROUTE_PAN, GRAIN_ROUTES };
 struct grain_settings {

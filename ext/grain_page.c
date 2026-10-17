@@ -18,7 +18,7 @@ int sprintf(char *buffer, const char *format, ...);
 #define SIZE_OCTAVES_Q16       784190u  /* log2(20000 / 5): DATA 2 sweeps Size by ratio */
 #define CENTS_PER_OCTAVE       1200u
 #define STEP_RATIO_SHIFT       5u       /* Size, Spray and Detune step by 1/32 of their value */
-#define STEP_COARSE            5        /* Overlap, Scan and Slide */
+#define STEP_COARSE            5        /* Overlap, Scan, Slide and Skew */
 #define TENTHS                 10
 #define HUNDREDTHS             100
 #define ROUTE_VOLTS            5        /* a route's span is five volts at +1.00 */
@@ -30,8 +30,8 @@ static const struct cell { u8 field, row, column, columns; const char *heading, 
     {GRAIN_OVERLAP, 1, 0, WIDE, "OVERLAP", "Overlap"}, {GRAIN_SPRAY, 1, 1, WIDE, "SPRAY", "Spray"},
     {GRAIN_DETUNE, 2, 0, WIDE, "DETUNE", "Detune"}, {GRAIN_SLIDE, 2, 1, WIDE, "SLIDE", "Slide"},
     {GRAIN_SCAN, 3, 0, NARROW, "SCAN", "Scan"}, {GRAIN_PAN, 3, 1, NARROW, "PAN", "Pan Spread"},
-    {GRAIN_SHAPE, 3, 2, NARROW, "SHAPE", "Shape"},
-    {GRAIN_OCTAVE, 4, 0, NARROW, "OCT", "Octave Up"}, {GRAIN_REVERSE, 4, 1, NARROW, "RVRS", "Reverse"},
+    {GRAIN_SHAPE, 3, 2, NARROW, "SHAPE", "Shape"}, {GRAIN_SKEW, 4, 0, NARROW, "SKEW", "Skew"},
+    {GRAIN_OCTAVE, 4, 1, NARROW, "OCT", "Octave Up"}, {GRAIN_REVERSE, 4, 2, NARROW, "RVRS", "Reverse"},
 };
 /* The Grain CV page's routes. */
 static const struct { const char *heading, *title, *unit; } routes[GRAIN_ROUTES] = {
@@ -59,6 +59,7 @@ static void format(u32 field, s32 value, char *out, const char **unit)
     case GRAIN_SPRAY: sprintf(out, "%d", value); *unit = " ms"; break;
     case GRAIN_DETUNE: sprintf(out, "%d", value); *unit = " cents"; break;
     case GRAIN_SLIDE: format_fraction(out, value, TENTHS); break;
+    case GRAIN_SKEW: sprintf(out, "%+d", value); *unit = ""; break;
     default: sprintf(out, "%d", value); break;
     }
 }
@@ -93,7 +94,7 @@ static void step(u32 channel, u32 cursor, s32 delta)
     if (field == GRAIN_ON) { grain_request(channel, field, delta > 0); return; }
     if (field == GRAIN_SIZE || field == GRAIN_SPRAY || field == GRAIN_DETUNE)
         unit = value >> STEP_RATIO_SHIFT ? value >> STEP_RATIO_SHIFT : 1;
-    else if (field == GRAIN_OVERLAP || field == GRAIN_SCAN || field == GRAIN_SLIDE) unit = STEP_COARSE;
+    else if (field == GRAIN_OVERLAP || field == GRAIN_SCAN || field == GRAIN_SLIDE || field == GRAIN_SKEW) unit = STEP_COARSE;
     grain_request(channel, field, value + delta * unit);
 }
 

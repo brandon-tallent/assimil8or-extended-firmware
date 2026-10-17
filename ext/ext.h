@@ -188,14 +188,15 @@ void eq_record(u32 index, u8 *out);
  * settings of patch.h. grain_request is the panel interrupt's way to set a
  * field, or past GRAIN_REQUEST_ROUTE a route's source (even) or amount (odd).
  * grain_set takes a Set parameter's number past the first: a field's own in
- * wire order up to Scan, or one of those below (Slide and the routes follow
- * the resample parameters). */
+ * wire order up to Scan, or one of those below (Slide, the routes and Skew
+ * follow the resample parameters). */
 #define GRAIN_REQUEST_ROUTE       32u
 #define GRAIN_SET_STATUS          10u
 #define GRAIN_SET_VIEW            11u
 #define GRAIN_SET_SLIDE           17u
 #define GRAIN_SET_ROUTE           18u /* a source and an amount for each route */
 #define GRAIN_SET_ROUTES          (GRAIN_SET_ROUTE + 2u * GRAIN_ROUTES)
+#define GRAIN_SET_SKEW            (GRAIN_SET_ROUTES + 1u)
 /* A route's field, and the span of it that five volts sweep at +1.00; a
  * zero span is five octaves. */
 struct grain_route { u8 field; u16 span; };
