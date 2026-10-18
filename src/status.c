@@ -26,8 +26,7 @@ static int status_notice_for(const char *text, s32 ticks)
 }
 static int status_notice(const char *text) { return status_notice_for(text, STATUS_MESSAGE_TICKS); }
 
-/* A hint about the field just selected: briefly, and as a notice, so it never
- * covers progress. The result of the operator's action uses status_show. */
+/* A short notice about the field just selected. */
 void status_hint(const char *text) { status_notice_for(text, STATUS_HINT_TICKS); }
 
 /* Panel tick: a running trial says so until promotion; a stable build that
