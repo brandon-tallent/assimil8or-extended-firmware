@@ -17,13 +17,17 @@ void status_show(const char *text)
 
 /* Background notices: shown only over an idle band or a timed message, never
  * over stock progress or persistent text such as folder loading. */
-static int status_notice(const char *text)
+static int status_notice_for(const char *text, s32 ticks)
 {
     u8 mode = BYTE(UI_OPERATION_STATUS_STATE + UI_OPERATION_STATUS_MODE);
     if (mode != UI_OPERATION_STATUS_MODE_IDLE && mode != UI_OPERATION_STATUS_MODE_TIMED) return 0;
-    status_show(text);
+    ui_operation_status_record_set_timed((void *)UI_OPERATION_STATUS_STATE, text, ticks, UI_STATUS_TEXT_COLOR);
     return 1;
 }
+static int status_notice(const char *text) { return status_notice_for(text, STATUS_MESSAGE_TICKS); }
+
+/* A page's hint about the field just selected: briefly, as a notice. */
+void status_hint(const char *text) { status_notice_for(text, STATUS_HINT_TICKS); }
 
 /* Panel tick: a running trial says so until promotion; a stable build that
  * returned from a failed trial says so once, as does one that found no

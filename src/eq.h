@@ -87,6 +87,7 @@ void eq_default(struct eq_value *value);
 void preset_extras_reset(void);
 void preset_extras_foreground(void);
 u32 eq_panel_active(void);
+void eq_panel_forget(void);
 void eq_panel_enter(u32 *context, u32 argument);
 void eq_panel_after_bits(u32 *context);
 void eq_panel_knob(u32 *context, u32 bits);

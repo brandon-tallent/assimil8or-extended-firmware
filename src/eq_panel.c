@@ -121,11 +121,65 @@ static void bind(u32 button, u32 offset, void (*callback)(u32 *, u32))
     REG32(FRONT_PANEL_STATE + button*FRONT_PANEL_RECORD_SIZE + offset) = (u32)callback;
     REG32(FRONT_PANEL_STATE + button*FRONT_PANEL_RECORD_SIZE + offset + 4) = 0;
 }
-static void clear_zone(u32 *context, u32 argument)
+static void apply_value(struct eq_value *next);
+/* The value being edited, flat: the EQ page's fields at their defaults, its
+ * CV routes (the EQ CV page's) kept. */
+static void flat(struct eq_value *next)
+{
+    const struct eq_value *v = value();
+    eq_default(next);
+    memcpy(next->source, v->source, sizeof(next->source));
+    memcpy(next->amount, v->amount, sizeof(next->amount));
+    next->override = v->override;
+}
+/* The settings a hold on EQ flattened, and whose they were (0: none),
+ * until a hold brings them back, a preset is saved or loaded, or another
+ * EQ is flattened. */
+static struct eq_value held;
+static u32 held_owner;
+static u32 owner(void) { return 1 + channel()*9 + (edit_zone ? zone() : 8); }
+void eq_panel_forget(void) { held_owner = 0; }
+/* What holding ENTER does here: on Edit, a zone follows its channel again;
+ * on EQ, the channel (or the zone's own EQ) goes flat, or flat goes back
+ * to the settings it replaced. */
+enum { HOLD_NONE, HOLD_FOLLOW, HOLD_CLEAR, HOLD_RESTORE };
+static u32 hold_action(void)
+{
+    if (page != PAGE_EQ || following()) return HOLD_NONE;
+    if (field == FIELD_SCOPE) return edit_zone ? HOLD_FOLLOW : HOLD_NONE;
+    if (field != FIELD_ON) return HOLD_NONE;
+    struct eq_value next;
+    flat(&next);
+    if (memcmp(&next, value(), sizeof(next))) return HOLD_CLEAR;
+    return held_owner == owner() ? HOLD_RESTORE : HOLD_NONE;
+}
+static void clear_hold(u32 *context, u32 argument)
 {
     (void)context; (void)argument;
-    if (!eq_panel_active() || page != PAGE_EQ || field != FIELD_SCOPE || !edit_zone) return;
-    memset(&eq_zones[channel()][zone()], 0, sizeof(struct eq_value));
+    if (!eq_panel_active()) return;
+    struct eq_value next;
+    switch (hold_action()) {
+    case HOLD_FOLLOW:
+        memset(&eq_zones[channel()][zone()], 0, sizeof(struct eq_value));
+        if (held_owner == owner()) held_owner = 0;
+        break;
+    case HOLD_CLEAR:
+        held = *value(); held_owner = owner();
+        flat(&next); apply_value(&next);
+        status_hint("EQ cleared");
+        break;
+    case HOLD_RESTORE:
+        /* CV routes set while flat stay. */
+        next = held;
+        memcpy(next.source, value()->source, sizeof(next.source));
+        memcpy(next.amount, value()->amount, sizeof(next.amount));
+        held_owner = 0;
+        apply_value(&next);
+        status_hint("EQ restored");
+        break;
+    default: return;
+    }
+    value_edit = 0;
     revision++;
 }
 void sample_setup_capture_state_transaction(u32 *context, u32 argument);
@@ -167,7 +221,7 @@ static void show(u32 next)
      * double-press binding, which would defer every short release. */
     for (u32 offset = 0; offset < PANEL_CALLBACK_SLOTS_END; offset += 8) bind(PANEL_ENTER, offset, 0);
     bind(PANEL_ENTER, PANEL_SHORT_RELEASE, enter_release);
-    bind(PANEL_ENTER, PANEL_HOLD, clear_zone);
+    bind(PANEL_ENTER, PANEL_HOLD, clear_hold);
     REG32(CDISPLAY_TASK_OBJECT + UI_PAGE_RENDER_PREVIOUS_PAGE) = ~0u;
     revision++;
 }
@@ -262,8 +316,12 @@ void eq_panel_select(u32 *context, s32 delta)
         step(&next, field, delta);
         apply_value(&next);
     } else {
+        u32 was = field;
         field = (u32)clamp((s32)field+delta, 0, (s32)field_count()-1);
         value_edit = 0;
+        u32 action = field != was && field == FIELD_ON ? hold_action() : HOLD_NONE;
+        if (action == HOLD_CLEAR) status_hint("Hold encoder to clear EQ");
+        else if (action == HOLD_RESTORE) status_hint("Hold encoder to restore EQ");
     }
     revision++;
 }
@@ -381,8 +439,9 @@ static void draw_eq_page(u32 *task, const struct eq_value *v)
     heading(LEFT_X, SETTINGS_HEADING_Y, "HPF");
     heading(LEFT_X+COLUMN_WIDTH, SETTINGS_HEADING_Y, "EQ");
     /* On EDIT, a zone with its own EQ shows how to let it follow again;
-     * the hint starts in the gap after the EQ heading to fit. */
-    if (field == FIELD_SCOPE && edit_zone && !following())
+     * the hint starts in the gap after the EQ heading to fit. (On EQ the
+     * hint goes to the status line: see eq_panel_select.) */
+    if (field == FIELD_SCOPE && hold_action() == HOLD_FOLLOW)
         heading(LEFT_X+2*COLUMN_WIDTH-HOLD_HINT_DX, SETTINGS_HEADING_Y, "HOLD:CLR");
     else heading(LEFT_X+2*COLUMN_WIDTH, SETTINGS_HEADING_Y, "EDIT");
     if (v->hpf) sprintf(line, "%d Hz", v->hpf); else sprintf(line, "Off");
