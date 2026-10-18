@@ -262,7 +262,7 @@ enum display_mode { DISPLAY_MODE_STOCK, DISPLAY_MODE_TEXT_WHITE, DISPLAY_MODE_AL
 #define UI_OPERATION_STATUS_MODE_TIMED 2u
 #define UI_STATUS_TEXT_COLOR      198u /* UI_OPERATION_STATUS_DEFAULT_TEXT_COLOR */
 #define STATUS_MESSAGE_TICKS      10000 /* outlasts the gap between block refreshes */
-#define STATUS_HINT_TICKS         3000
+#define STATUS_HINT_TICKS         3000 /* a hint about the selected field: shorter than a result */
 #define STATUS_NOTICE_START_TICKS 3000u /* let the stock UI settle after boot */
 #define STATUS_NOTICE_REFRESH_TICKS 5000u
 

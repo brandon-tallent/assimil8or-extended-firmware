@@ -137,7 +137,12 @@ static void flat(struct eq_value *next)
  * EQ is flattened. */
 static struct eq_value held;
 static u32 held_owner;
-static u32 owner(void) { return 1 + channel()*9 + (edit_zone ? zone() : 8); }
+#define OWNER_SLOTS_PER_CHANNEL 9u /* a channel's eight zones, then the channel's own EQ */
+#define OWNER_CHANNEL_SLOT      8u
+static u32 owner(void)
+{
+    return 1 + channel()*OWNER_SLOTS_PER_CHANNEL + (edit_zone ? zone() : OWNER_CHANNEL_SLOT);
+}
 void eq_panel_forget(void) { held_owner = 0; }
 /* What holding ENTER does here: on Edit, a zone follows its channel again;
  * on EQ, the channel (or the zone's own EQ) goes flat, or flat goes back
@@ -166,7 +171,7 @@ static void clear_hold(u32 *context, u32 argument)
     case HOLD_CLEAR:
         held = *value(); held_owner = owner();
         flat(&next); apply_value(&next);
-        status_hint("EQ cleared");
+        status_show("EQ cleared");
         break;
     case HOLD_RESTORE:
         /* CV routes set while flat stay. */
@@ -175,7 +180,7 @@ static void clear_hold(u32 *context, u32 argument)
         memcpy(next.amount, value()->amount, sizeof(next.amount));
         held_owner = 0;
         apply_value(&next);
-        status_hint("EQ restored");
+        status_show("EQ restored");
         break;
     default: return;
     }
@@ -319,6 +324,8 @@ void eq_panel_select(u32 *context, s32 delta)
         u32 was = field;
         field = (u32)clamp((s32)field+delta, 0, (s32)field_count()-1);
         value_edit = 0;
+        /* Unlike the EDIT field's HOLD:CLR heading, the EQ field's hint is a
+         * status notice: the EQ heading stays as is. */
         u32 action = field != was && field == FIELD_ON ? hold_action() : HOLD_NONE;
         if (action == HOLD_CLEAR) status_hint("Hold encoder to clear EQ");
         else if (action == HOLD_RESTORE) status_hint("Hold encoder to restore EQ");
