@@ -82,6 +82,7 @@ static void defaults(struct extras *e)
 static void load(const struct extras *e)
 {
     if (e) patch_live = *e; else defaults(&patch_live);
+    eq_panel_forget();
     eq_changed();
     patch_grain_loaded++;
 }
@@ -293,6 +294,7 @@ u32 preset_extras_save(void *holder, u32 index, void *model)
 {
     struct extras *e = slot(index);
     if (e) *e = patch_live;
+    eq_panel_forget();
     return extras_save_stock(holder, index, model);
 }
 /* preset_erase_library_index_schedule_yaml_delete; its caller loads the
