@@ -3,6 +3,11 @@
 #include "patch.h"
 #define EQ_EDITOR 0x800dba88u
 #define EQ_MODEL 0x80114a64u
+#define EQ_ZONE_SELECTOR_BASE 0x9ffff580u  /* ENGINE_CHANNEL_ZONE_SELECTOR_BASE */
+#define EQ_CHANNEL_RECORDS (EQ_MODEL + 0x20u) /* CURRENT_WORKING_PRESET_FIRST_CHANNEL */
+#define EQ_CHANNEL_MODE 0x264u              /* PRESET_CHANNEL_MODE */
+#define EQ_CHANNEL_MODE_STEREO_RIGHT 2u
+#define EQ_ZONE_MASK 7u
 #define EQ_CHANNEL_BYTES 0x2c8u
 #define EQ_SECTION_COUNT 5u
 /* Gain in 0.1 dB. A bell reaches +/-18 dB, the inter-section headroom; a
@@ -40,6 +45,30 @@ struct eq_value {
     signed char source[EQ_MOD_COUNT], amount[EQ_MOD_COUNT];
     u8 q[3], reserved; /* reserved stays zero: values compare by memcmp */
 };
+/* The channel filter (filter.S; eq_model.c publishes it, eq_math.c designs it): a type, the cutoff in Hz
+ * (EQ_FREQUENCY_MIN..EQ_FREQUENCY_MAX), a resonance and an extra control
+ * whose meaning depends on the type, and a source and amount for the cutoff,
+ * resonance, extra and type routes as an EQ route's. A zone that follows its
+ * channel is all zero, as an EQ zone is, and values compare by memcmp (the
+ * record has no padding). */
+enum { FILTER_OFF, FILTER_LP24, FILTER_LP12, FILTER_BP24, FILTER_BP12, FILTER_HP24, FILTER_HP12,
+       FILTER_NOTCH24, FILTER_NOTCH12, FILTER_BAND_STOP, FILTER_DUAL, FILTER_TYPES };
+enum { FILTER_MOD_CUTOFF, FILTER_MOD_RESONANCE, FILTER_MOD_EXTRA, FILTER_MOD_TYPE, FILTER_MOD_COUNT };
+#define FILTER_RESONANCE_MAX 100u
+#define FILTER_EXTRA_MAX 100u
+/* What a route moves at +1.00 per volt: 5 V takes the cutoff across the
+ * whole 20 Hz..20 kHz range, Resonance and Extra across theirs, and Type
+ * through every type. */
+#define FILTER_CUTOFF_OCTAVES_PER_VOLT 2
+#define FILTER_STEPS_PER_VOLT 20
+#define FILTER_TYPE_STEPS_PER_VOLT 2
+struct filter_value {
+    u8 type, resonance, extra, override;
+    u16 cutoff;
+    signed char source[FILTER_MOD_COUNT], amount[FILTER_MOD_COUNT];
+};
+/* What Extra sets for a type, or null when the type has none. */
+const char *filter_extra_name(u32 type);
 struct eq_group { s32 mask[4], coefficient[5][5][4]; };
 struct eq_bank { struct eq_group group[2]; };
 struct eq_history_group { s32 mask[4]; struct { s32 coefficient[5][4], history[5][4]; } section[5]; };
@@ -50,11 +79,14 @@ extern s32 eq_steps[2][5][5][4];
 /* A preset's settings beyond the stock model (preset_extras.c): the live
  * ones, and what each library slot holds. A zone that follows its channel
  * is all zero, so two records compare by memcmp. */
-struct extras { struct eq_value channels[8], zones[8][8]; struct grain_settings grain; };
+struct extras { struct eq_value channels[8], zones[8][8]; struct grain_settings grain;
+                struct filter_value filters[8], zone_filters[8][8]; };
 extern struct extras patch_live;
 #define eq_channels patch_live.channels
 #define eq_zones patch_live.zones
 #define patch_grain patch_live.grain
+#define filter_channels patch_live.filters
+#define filter_zones patch_live.zone_filters
 void eq_coefficients(const struct eq_value *value, s32 out[5][5]);
 /* A band's gain limit for its shape, and every gain brought inside it. */
 s32 eq_gain_limit(const struct eq_value *value, u32 band);
@@ -71,6 +103,8 @@ void eq_modulate(const struct eq_value *value, u32 channel, struct eq_value *out
  * relative source (CV A..CV C) reads `channel`'s inputs; Off reads zero. */
 #define EQ_CV_COUNTS_FULL 32768
 s32 eq_cv_counts(s32 source, u32 channel);
+/* The input a source reads for channel, 0..23, or -1 for Off. */
+s32 eq_cv_input(s32 source, u32 channel);
 u32 eq_modulated(const struct eq_value *value);
 void eq_foreground_poll(void);
 /* CMD_EQ_AUTOMATE: one channel EQ field from a sequencer, without a reply.
@@ -83,6 +117,31 @@ enum { EQ_AUTOMATE_FREQUENCY, EQ_AUTOMATE_GAIN = EQ_AUTOMATE_FREQUENCY + 3, EQ_A
 #define EQ_CENTS_PER_OCTAVE 1200
 #define EQ_TENTHS_PER_DB 10
 void eq_changed(void);
+void filter_changed(void);
+void filter_default(struct filter_value *value, u32 channel);
+void filter_foreground_poll(void);
+/* One lane of the filter's published vectors (filter.S) for a setting: the
+ * lane mask, section 1's a1 a2 a3 and k/4, section 2's, the two tap mixes
+ * (input, lowpass, bandpass, highpass each, as Q30 so a weight reaches 2),
+ * the lanes whose cutoff its CV moves, with their sections' base g and k
+ * (floats), the cutoff CV's input (a byte offset into the calibrated CV
+ * block) and octaves per count (float), and the weight of section 1's
+ * lowpass in the output, which runs section 2 beside it rather than after
+ * it. The last vector holds a group's flags. */
+enum { FILTER_VECTOR_MASK, FILTER_VECTOR_SECTION_1, FILTER_VECTOR_SECTION_2 = 5, FILTER_VECTOR_MIX_1 = 9,
+       FILTER_VECTOR_MIX_2 = 13, FILTER_VECTOR_DYNAMIC_MASK = 17,
+       FILTER_VECTOR_G1, FILTER_VECTOR_K1, FILTER_VECTOR_CV_INPUT, FILTER_VECTOR_CV_SCALE,
+       FILTER_VECTOR_G2, FILTER_VECTOR_K2, FILTER_VECTOR_MIX_2_LP1, FILTER_VECTOR_FLAGS, FILTER_VECTORS };
+/* A group's flags, one word each: a lane's cutoff moves with its CV. */
+enum { FILTER_FLAG_DYNAMIC };
+void filter_lane(const struct filter_value *value, s32 out[FILTER_VECTORS]);
+void filter_curve(const struct filter_value *value, u32 points, u8 *out, s32 top, s32 bottom, s32 db_top, s32 db_bottom);
+/* The setting as channel's routes move it now, cutoff included, for the
+ * page's graph; the renderer moves the cutoff itself each block. */
+void filter_live(const struct filter_value *value, u32 channel, struct filter_value *out);
+u32 filter_modulated(const struct filter_value *value);
+/* A DATA 2 position (0..1 as Q16) on the log scale of frequencies. */
+u16 eq_frequency_from_q16(u32 q16);
 void eq_default(struct eq_value *value);
 void preset_extras_reset(void);
 void preset_extras_foreground(void);

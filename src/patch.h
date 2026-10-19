@@ -91,6 +91,7 @@ struct grain_settings {
 struct grain_range { s16 low, high, initial; };
 extern const struct grain_range grain_ranges[GRAIN_FIELDS];
 extern u32 patch_grain_loaded;
+extern u32 patch_extras_saved; /* counts the times a Save took the live settings */
 /* Resampling (eq.S, grain.S, record.c): each frame keeps the eight channels'
  * outputs, after level, envelope, Bits and EQ. While patch_resample_source
  * points at one, the stock 48 kHz capture stage records it and the word
@@ -262,7 +263,6 @@ enum display_mode { DISPLAY_MODE_STOCK, DISPLAY_MODE_TEXT_WHITE, DISPLAY_MODE_AL
 #define UI_OPERATION_STATUS_MODE_TIMED 2u
 #define UI_STATUS_TEXT_COLOR      198u /* UI_OPERATION_STATUS_DEFAULT_TEXT_COLOR */
 #define STATUS_MESSAGE_TICKS      10000 /* outlasts the gap between block refreshes */
-#define STATUS_HINT_TICKS         3000 /* a hint about the selected field: shorter than a result */
 #define STATUS_NOTICE_START_TICKS 3000u /* let the stock UI settle after boot */
 #define STATUS_NOTICE_REFRESH_TICKS 5000u
 
@@ -540,7 +540,6 @@ void panel_tick(void);
 
 /* status.c */
 void status_show(const char *text);
-void status_hint(const char *text);
 void status_panel_tick(void);
 
 /* trace.c */

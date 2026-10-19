@@ -2,7 +2,7 @@
 
 An Assimil8or preset is a text file, `prstNNN.yml`, in its folder on the
 card. This firmware reads and writes Rossum's format unchanged and adds a
-few lines of its own for the EQ and the grain settings. This document
+few lines of its own for the EQ, the filter and the grain settings. This document
 describes those lines, then the stock keys as the v3.04 software reads
 them, for anyone writing preset files or an editor.
 
@@ -10,8 +10,8 @@ them, for anyone writing preset files or an editor.
 
 They follow the stock preset body. Each is a key, a colon and integers.
 Rossum's software loads a preset without them, since their keys match none
-of its own, and leaves them out when it saves. A preset whose EQ and grain
-settings are all at their defaults has none, and is exactly the file
+of its own, and leaves them out when it saves. A preset whose EQ, filter and
+grain settings are all at their defaults has none, and is exactly the file
 Rossum's software writes.
 
 | Line | Values |
@@ -19,6 +19,9 @@ Rossum's software writes.
 | `EQ<c>` | Channel c's EQ: On (0 or 1), HPF in Hz (0 Off, else 20–350), then for Low, Mid and High the frequency in Hz (20–20000), the gain in 0.1 dB (±180 for a bell, ±100 for a shelf) and the Q step (0 the band's own shape, 1–41 a bell of Q = 0.5 · 2^((q − 1) / 8)) |
 | `EQCV<c>` | Channel c's seven CV routes, a source and an amount each, for Low frequency, Low gain, Mid frequency, Mid gain, High frequency, High gain and HPF |
 | `EQ<c>Z<z>`, `EQCV<c>Z<z>` | The same for zone z of channel c when it has its own EQ. A zone without an `EQ<c>Z<z>` line follows its channel |
+| `FILT<c>` | Channel c's filter: Type (0 Off, 1 LP 24, 2 LP 12, 3 BP 24, 4 BP 12, 5 HP 24, 6 HP 12, 7 Notch 24, 8 Notch 12, 9 Band Stop, 10 Dual L/BP), Cutoff in Hz (20–20000), Resonance (0–100) and Extra (0–100). Extra is Band Stop's spread, the high-pass's distance above the cutoff at 0.11 octave a step, and Dual L/BP's offset, where its band-pass sits from 5.6 octaves below the cutoff to above it at 0.11 octave a step; the other types ignore it |
+| `FILTCV<c>` | Channel c's four CV routes, a source and an amount each, for Cutoff, Resonance, Extra and Type |
+| `FILT<c>Z<z>`, `FILTCV<c>Z<z>` | The same for zone z of channel c when it has its own filter. A zone without a `FILT<c>Z<z>` line follows its channel |
 | `Grain` | The grain channel (1–8, or 0 for off), then Size (0.1 ms, 5–20000), Overlap (percent, 25–800), Spray (ms, 0–2000), Detune (cents, 0–1200), Octave, Reverse and Pan (percent, 0–100), Shape (percent, 1–100), Scan (percent, ±400), Slide (0.1 percent of the zone, ±1000) and Skew (±100) |
 | `GrainCV` | Eight CV routes, a source and an amount each, for Size, Overlap, Spray, Detune, Slide, Scan, Shape and Pan |
 
@@ -27,10 +30,11 @@ the channel's own CV A, B and C inputs, and 0 to 23 for the inputs 1A, 1B,
 1C, 2A … 8C. An amount is −100 to 100, for −1.00 to +1.00.
 
 Keys are not case-sensitive. A line with a channel or zone outside 1–8, or
-with too few numbers, is ignored; values outside their ranges are brought
+with more or fewer numbers than its key takes, is ignored; values outside their ranges are brought
 inside them. Only lines that differ from the defaults are written. The
 defaults are EQ On, HPF Off, 150 Hz, 1 kHz and 10 kHz at 0 dB with each
-band's own shape; every route Off at +1.00; and Grain
+band's own shape; the filter Off at 1000 Hz, Resonance 0 and Extra 50;
+every route Off at +1.00; and Grain
 `0 600 400 20 0 0 0 50 100 100 0 0`.
 
 ```yaml
@@ -43,13 +47,18 @@ Preset 1 :
   EQ1 : 1 80 150 30 0 1000 -45 12 10000 0 0
   EQCV1 : -4 100 -4 100 0 50 -4 100 -4 100 -4 100 -4 100
   EQ1Z1 : 1 0 150 0 0 1000 0 0 8000 -60 0
+  FILT1 : 1 800 55 50
+  FILTCV1 : 3 50 -4 100 -4 100 -4 100
+  FILT1Z1 : 6 3000 55 50
   Grain : 1 800 400 20 0 0 25 50 100 0 0 -60
   GrainCV : -4 100 -4 100 -4 100 -4 100 5 100 -4 100 -4 100 -4 100
 ```
 
 Here channel 1 has an 80 Hz high-pass, +3 dB at 150 Hz and a −4.5 dB bell
 at 1 kHz whose frequency follows input 1A at half depth; its first zone has
-its own EQ; and channel 1 plays 80 ms grains held where the note began,
+its own EQ; its filter is a 24 dB low-pass at 800 Hz, resonance 55, whose cutoff
+follows input 2A at half depth and opens by two octaves with the amp
+envelope, and that zone has its own 12 dB high-pass at 3 kHz; and channel 1 plays 80 ms grains held where the note began,
 with Slide following input 2C.
 
 ## The stock keys

@@ -28,7 +28,7 @@ static struct {
     u32 saving;
 } job;
 
-static void init(void) { memset(&job, 0, sizeof(job)); folder_init(); stream_init(); audition_init(); grains_init(); resample_init(); }
+static void init(void) { memset(&job, 0, sizeof(job)); folder_init(); stream_init(); audition_init(); grains_init(); filter_page_init(); resample_init(); }
 static int busy(void) { return job.command != 0; }
 
 /* EDIT_SET with this sequence, which no request uses, is automation. */
@@ -86,6 +86,13 @@ enum {
     SET_EQ_HPF, SET_EQ_FREQUENCY, SET_EQ_GAIN = SET_EQ_FREQUENCY + 3, SET_EQ_ON = SET_EQ_GAIN + 3,
     SET_EQ_OVERRIDE, SET_EQ_SOURCE, SET_EQ_AMOUNT = SET_EQ_SOURCE + EQ_MOD_COUNT,
     SET_EQ_Q = SET_EQ_AMOUNT + EQ_MOD_COUNT, SET_EQ_IDS = SET_EQ_Q + 3
+};
+/* Channel/zone filter (filter.S): the zone byte works as the EQ's. */
+#define SET_FILTER_FIRST 128u
+enum {
+    SET_FILTER_TYPE, SET_FILTER_CUTOFF, SET_FILTER_RESONANCE, SET_FILTER_EXTRA, SET_FILTER_OVERRIDE,
+    SET_FILTER_SOURCE, SET_FILTER_AMOUNT = SET_FILTER_SOURCE + FILTER_MOD_COUNT,
+    SET_FILTER_IDS = SET_FILTER_AMOUNT + FILTER_MOD_COUNT
 };
 /* Grain mode fields (grains.c); the zone byte is unused. Resampling
  * (resample.c) follows them. */
@@ -198,6 +205,16 @@ void eq_record(u32 index, u8 *out)
     memcpy(out + 16 + 2 * EQ_MOD_COUNT, v->q, 3);
 }
 
+void filter_record(u32 index, u8 *out)
+{
+    u32 channel = index / EQ_SLOTS, slot = index % EQ_SLOTS;
+    const struct filter_value *v = slot == EQ_SLOT_CHANNEL ? &filter_channels[channel] : &filter_zones[channel][slot];
+    out[0] = v->type;
+    put_u16(out + 1, v->cutoff);
+    out[3] = v->resonance; out[4] = v->extra; out[5] = v->override;
+    for (u32 m = 0; m < FILTER_MOD_COUNT; ++m) { out[6 + m] = (u8)v->source[m]; out[6 + FILTER_MOD_COUNT + m] = (u8)v->amount[m]; }
+}
+
 /* One EQ field, clamped to the panel's ranges; the stored value is returned.
  * A band that becomes a shelf brings its gain inside the shelf's range. */
 static u32 set_eq(u32 channel, u32 slot, u32 id, s32 value, s32 *stored)
@@ -234,6 +251,30 @@ static u32 set_eq(u32 channel, u32 slot, u32 id, s32 value, s32 *stored)
     return OK;
 }
 
+/* One filter field, clamped to the panel's ranges; the stored value is returned. */
+static u32 set_filter(u32 channel, u32 slot, u32 id, s32 value, s32 *stored)
+{
+    if (channel >= PRESET_CHANNELS || slot > EQ_SLOT_CHANNEL || id >= SET_FILTER_IDS) return BAD_RANGE;
+    if (id == SET_FILTER_OVERRIDE && slot == EQ_SLOT_CHANNEL) return BAD_RANGE;
+    struct filter_value next = slot == EQ_SLOT_CHANNEL ? filter_channels[channel] : filter_zones[channel][slot];
+    if (slot != EQ_SLOT_CHANNEL && !next.override) next = filter_channels[channel];
+    next.override = slot != EQ_SLOT_CHANNEL;
+    if (id == SET_FILTER_TYPE) *stored = next.type = (u8)clamp(value, FILTER_OFF, FILTER_TYPES - 1);
+    else if (id == SET_FILTER_CUTOFF) *stored = next.cutoff = (u16)clamp(value, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+    else if (id == SET_FILTER_RESONANCE) *stored = next.resonance = (u8)clamp(value, 0, FILTER_RESONANCE_MAX);
+    else if (id == SET_FILTER_EXTRA) *stored = next.extra = (u8)clamp(value, 0, FILTER_EXTRA_MAX);
+    else if (id == SET_FILTER_OVERRIDE) {
+        /* A zone that follows its channel again holds nothing. */
+        if (!value) memset(&next, 0, sizeof(next));
+        *stored = next.override;
+    }
+    else if (id < SET_FILTER_AMOUNT) *stored = next.source[id - SET_FILTER_SOURCE] = (signed char)clamp(value, EQ_CV_SOURCE_OFF, EQ_CV_SOURCE_MAX);
+    else *stored = next.amount[id - SET_FILTER_AMOUNT] = (signed char)clamp(value, -EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX);
+    if (slot == EQ_SLOT_CHANNEL) filter_channels[channel] = next;
+    else filter_zones[channel][slot] = next;
+    return OK;
+}
+
 static u32 set_parameter(const u8 *p, u8 *out, u32 *count)
 {
     u32 channel = p[0], zone = p[1];
@@ -241,6 +282,14 @@ static u32 set_parameter(const u8 *p, u8 *out, u32 *count)
     if (p[2] >= SET_GRAIN_FIRST + GRAIN_SET_SLIDE) return grain_set(channel, p[2] - SET_GRAIN_FIRST, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_RESAMPLE_FIRST) return resample_set(channel, zone, p[2] - SET_RESAMPLE_FIRST, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_GRAIN_FIRST) return grain_set(channel, p[2] - SET_GRAIN_FIRST, (s32)get_u32(p + 3), out, count);
+    if (p[2] >= SET_FILTER_FIRST && p[2] < SET_FILTER_FIRST + SET_FILTER_IDS) {
+        s32 stored;
+        u32 status = set_filter(channel, zone, p[2] - SET_FILTER_FIRST, (s32)get_u32(p + 3), &stored);
+        if (status != OK) return status;
+        put_u32(out, (u32)stored);
+        *count = 4;
+        return OK;
+    }
     if (p[2] >= SET_EQ_FIRST) {
         s32 stored;
         u32 status = set_eq(channel, zone, p[2] - SET_EQ_FIRST, (s32)get_u32(p + 3), &stored);
@@ -318,8 +367,8 @@ static void automate_request(const u8 *p, u32 bytes)
 }
 
 /* Store one automated value: the parameters a lane may move are a channel's
- * and a zone's two-byte values and switches, the times, the EQ's CV routes
- * and the grain values. Sample positions, Channel Mode and Mute/Solo are
+ * and a zone's two-byte values and switches, the times, the EQ's CV routes,
+ * the channel filter and the grain values. Sample positions, Channel Mode and Mute/Solo are
  * edits, not automation. */
 static void automate_store(u32 channel, u32 zone, u32 id, u32 above)
 {
@@ -332,6 +381,18 @@ static void automate_store(u32 channel, u32 zone, u32 id, u32 above)
                     field < GRAIN_SET_STATUS ? field : GRAIN_FIELDS;
         if (value == GRAIN_FIELDS) return; /* status, resampling and the routes */
         (void)grain_set(channel, field, grain_low(value) + (s32)above, out, &count);
+        return;
+    }
+    if (id >= SET_FILTER_FIRST) {
+        static const s32 low[SET_FILTER_SOURCE] = {
+            FILTER_OFF, EQ_FREQUENCY_MIN, 0, 0, 0
+        };
+        s32 stored;
+        u32 field = id - SET_FILTER_FIRST;
+        if (field >= SET_FILTER_IDS || field == SET_FILTER_OVERRIDE) return;
+        (void)set_filter(channel, EQ_SLOT_CHANNEL, field,
+                         (field < SET_FILTER_SOURCE ? low[field] : field < SET_FILTER_AMOUNT ? EQ_CV_SOURCE_OFF : -EQ_CV_AMOUNT_MAX) + (s32)above,
+                         &stored);
         return;
     }
     if (id >= SET_EQ_FIRST) {
@@ -562,14 +623,16 @@ static u32 summary(u8 *out, u32 *count)
     u32 n = 0, at = 18 + PRESET_CHANNELS;
     const char *folder = (const char *)ACTIVE_FOLDER_NAME;
     while (n < ACTIVE_FOLDER_BYTES - 1 && folder[n]) { out[at + n] = (u8)folder[n]; ++n; }
-    /* The EQ tables' checksum, then grain mode's, after the folder's
+    /* The EQ tables' checksum, then grain mode's and the filter's, after the folder's
      * terminator: older readers stop the folder name there. */
     out[at + n] = 0;
     u32 crc = ~0u;
     crc = crc32_update(crc, eq_channels, sizeof(eq_channels));
     put_u32(out + at + n + 1, ~crc32_update(crc, eq_zones, sizeof(eq_zones)));
     put_u32(out + at + n + 5, grain_crc());
-    *count = at + n + 9;
+    crc = crc32_update(~0u, filter_channels, sizeof(filter_channels));
+    put_u32(out + at + n + 9, ~crc32_update(crc, filter_zones, sizeof(filter_zones)));
+    *count = at + n + 13;
     return OK;
 }
 
@@ -628,6 +691,7 @@ static void foreground(void)
     grains_foreground();
     audition_foreground();
     resample_foreground();
+    filter_page_foreground();
     u32 command = job.command;
     if (!command) { automate_foreground(); return; }
     u8 out[REPLY_BYTES - 1]; u32 count = 0, status = OK;

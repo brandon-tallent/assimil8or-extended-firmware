@@ -16,6 +16,9 @@
  *   EQCV<c> : source amount for Low frequency, Low gain, Mid frequency,
  *             Mid gain, High frequency, High gain and HPF
  *   EQ<c>Z<z>, EQCV<c>Z<z> : the same for a zone with its own EQ
+ *   FILT<c> : type cutoff resonance extra
+ *   FILTCV<c> : source amount for Cutoff, Resonance, Extra and Type
+ *   FILT<c>Z<z>, FILTCV<c>Z<z> : the same for a zone with its own filter
  *   Grain : channel size overlap spray detune octave reverse pan shape scan slide skew
  *   GrainCV : source amount for each route
  *
@@ -32,6 +35,7 @@
 #define ZONES                     8u
 #define NO_ZONE                   ZONES
 #define EQ_NUMBERS                11u       /* on, hpf, three bands of three */
+#define FILTER_NUMBERS            4u        /* type, cutoff, resonance, extra */
 #define NUMBERS_MAX               16u
 #define LINE_BYTES                112u
 #define KEY_BYTES                 12u
@@ -47,6 +51,7 @@ int strncasecmp(const char *a, const char *b, u32 bytes);
 
 struct extras patch_live;
 u32 patch_grain_loaded;
+u32 patch_extras_saved;
 /* A slot per library record that has extras. Slots are allocated in the
  * foreground: while a folder's presets are parsed, and one kept ready for a
  * load or Save, which the front panel runs in its interrupt. */
@@ -70,7 +75,10 @@ const struct grain_range grain_ranges[GRAIN_FIELDS] = {
 static void defaults(struct extras *e)
 {
     memset(e, 0, sizeof(*e));
-    for (u32 ch = 0; ch < CHANNELS; ++ch) eq_default(&e->channels[ch]);
+    for (u32 ch = 0; ch < CHANNELS; ++ch) {
+        eq_default(&e->channels[ch]);
+        filter_default(&e->filters[ch], ch);
+    }
     for (u32 f = 0; f < GRAIN_FIELDS; ++f) e->grain.value[f] = grain_ranges[f].initial;
     for (u32 r = 0; r < GRAIN_ROUTES; ++r) {
         e->grain.source[r] = EQ_CV_SOURCE_OFF;
@@ -84,6 +92,7 @@ static void load(const struct extras *e)
     if (e) patch_live = *e; else defaults(&patch_live);
     eq_panel_forget();
     eq_changed();
+    filter_changed();
     patch_grain_loaded++;
 }
 void preset_extras_reset(void) { load(0); }
@@ -162,6 +171,18 @@ static void get_eq(const struct eq_value *v, s32 *n)
     }
 }
 
+static void put_filter(struct filter_value *v, const s32 *n)
+{
+    v->type = (u8)clamp(n[0], FILTER_OFF, FILTER_TYPES - 1);
+    v->cutoff = (u16)clamp(n[1], EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+    v->resonance = (u8)clamp(n[2], 0, FILTER_RESONANCE_MAX);
+    v->extra = (u8)clamp(n[3], 0, FILTER_EXTRA_MAX);
+}
+static void get_filter(const struct filter_value *v, s32 *n)
+{
+    n[0] = v->type; n[1] = v->cutoff; n[2] = v->resonance; n[3] = v->extra;
+}
+
 /* A signed decimal after spaces and the key's colon; null when there is none. */
 static const char *number(const char *s, s32 *out)
 {
@@ -179,9 +200,9 @@ static const char *number(const char *s, s32 *out)
 static void line(u32 model, const char *s)
 {
     while (*s == ' ' || *s == '\t') ++s;
-    u32 grain = !strncasecmp(s, "Grain", 5);
-    if (!grain && strncasecmp(s, "EQ", 2)) return;
-    s += grain ? 5 : 2;
+    u32 grain = !strncasecmp(s, "Grain", 5), filter = !strncasecmp(s, "FILT", 4);
+    if (!grain && !filter && strncasecmp(s, "EQ", 2)) return;
+    s += grain ? 5 : filter ? 4 : 2;
     u32 cv = !strncasecmp(s, "CV", 2), channel = 0, zone = NO_ZONE;
     if (cv) s += 2;
     if (!grain) {
@@ -193,16 +214,25 @@ static void line(u32 model, const char *s)
             s += 2;
         }
     }
-    u32 wanted = cv ? 2*(grain ? GRAIN_ROUTES : EQ_MOD_COUNT) : grain ? GRAIN_FIELDS : EQ_NUMBERS, count = 0;
+    u32 wanted = cv ? 2*(grain ? GRAIN_ROUTES : filter ? FILTER_MOD_COUNT : EQ_MOD_COUNT)
+                    : grain ? GRAIN_FIELDS : filter ? FILTER_NUMBERS : EQ_NUMBERS, count = 0;
     s32 n[NUMBERS_MAX];
     while (count < wanted && (s = number(s, &n[count]))) ++count;
-    if (count != wanted) return;
+    /* A line with more or fewer numbers than ours has another layout. */
+    s32 more;
+    if (count != wanted || number(s, &more)) return;
     struct extras *e = destination(model);
     if (!e) return;
     if (grain) {
         if (cv) put_routes(e->grain.source, e->grain.amount, n, GRAIN_ROUTES);
         else for (u32 f = 0; f < GRAIN_FIELDS; ++f)
             e->grain.value[f] = (s16)clamp(n[f], grain_ranges[f].low, grain_ranges[f].high);
+        return;
+    }
+    if (filter) {
+        struct filter_value *f = zone == NO_ZONE ? &e->filters[channel] : &e->zone_filters[channel][zone];
+        if (zone != NO_ZONE && !f->override) { filter_default(f, channel); f->override = 1; }
+        if (cv) put_routes(f->source, f->amount, n, FILTER_MOD_COUNT); else put_filter(f, n);
         return;
     }
     struct eq_value *v = zone == NO_ZONE ? &e->channels[channel] : &e->zones[channel][zone];
@@ -240,6 +270,26 @@ static void write_eq(FIL *file, const struct eq_value *v, u32 channel, u32 zone)
     }
 }
 
+/* One filter record's lines, as an EQ record's. */
+static void write_filter(FIL *file, const struct filter_value *v, u32 channel, u32 zone)
+{
+    struct filter_value plain;
+    char key[KEY_BYTES], suffix[4] = "";
+    s32 n[NUMBERS_MAX], standard[FILTER_NUMBERS];
+    filter_default(&plain, channel);
+    get_filter(&plain, standard);
+    get_filter(v, n);
+    if (zone != NO_ZONE) sprintf(suffix, "Z%d", zone + 1);
+    if (zone != NO_ZONE || memcmp(n, standard, sizeof(standard))) {
+        sprintf(key, "FILT%d%s", channel + 1, suffix);
+        write_line(file, key, n, FILTER_NUMBERS);
+    }
+    if (get_routes(v->source, v->amount, n, FILTER_MOD_COUNT)) {
+        sprintf(key, "FILTCV%d%s", channel + 1, suffix);
+        write_line(file, key, n, 2*FILTER_MOD_COUNT);
+    }
+}
+
 static void append(const char *path, const struct extras *e)
 {
     FIL file;
@@ -250,6 +300,9 @@ static void append(const char *path, const struct extras *e)
             write_eq(&file, &e->channels[ch], ch, NO_ZONE);
             for (u32 z = 0; z < ZONES; ++z)
                 if (e->zones[ch][z].override) write_eq(&file, &e->zones[ch][z], ch, z);
+            write_filter(&file, &e->filters[ch], ch, NO_ZONE);
+            for (u32 z = 0; z < ZONES; ++z)
+                if (e->zone_filters[ch][z].override) write_filter(&file, &e->zone_filters[ch][z], ch, z);
         }
         u32 differs = 0;
         for (u32 f = 0; f < GRAIN_FIELDS; ++f) {
@@ -295,6 +348,7 @@ u32 preset_extras_save(void *holder, u32 index, void *model)
     struct extras *e = slot(index);
     if (e) *e = patch_live;
     eq_panel_forget();
+    patch_extras_saved++;
     return extras_save_stock(holder, index, model);
 }
 /* preset_erase_library_index_schedule_yaml_delete; its caller loads the

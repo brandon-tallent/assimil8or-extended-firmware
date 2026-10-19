@@ -3,9 +3,10 @@
 An unofficial firmware extension for the Rossum Electro-Music Assimil8or:
 
 * A three-band EQ and high-pass filter on every channel, with an EQ of its own for any zone and CV control of every band.
+* A multimode filter on every channel, or on any zone alone: low-pass, band-pass, high-pass and notch at 12 or 24 dB per octave, band stop and a dual low-pass/band-pass, with resonance and CV control of cutoff, resonance, the type's extra setting and the type.
 * Grain mode: a channel or stereo pair plays its sample as up to eight overlapping grains, for stretching, freezing and scattering, with CV control of eight parameters.
 * Resample: record a channel's own output straight into one of its zones.
-* Presets keep the EQ and grain settings, in files Rossum's software still loads.
+* Presets keep the EQ, filter and grain settings, in files Rossum's software still loads.
 * MIDI remote control (with a Locutus): read and edit presets, browse the card, audition and assign samples, drive the panel and read the display. The protocol is documented so anyone can write an editor.
 
 All original features remain. The new pages sit behind a second press of the Mutate and Phase Mod buttons, and Rossum's software can be loaded again at any time.

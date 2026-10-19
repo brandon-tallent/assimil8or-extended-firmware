@@ -15,13 +15,32 @@ struct panel_page {
     u32 (*revision)(void);                                 /* changes when the page must redraw */
     void (*sample)(u32 channel);                           /* the Sample button here, in place of a stock take */
     const struct panel_page *next;                         /* the page after this one, or null */
+    u32 (*enter)(u32 channel, u32 field);                  /* ENTER, before the stock popup: nonzero if handled */
+    void (*hold)(u32 channel, u32 field);                  /* ENTER held, or null */
+    u32 (*count)(u32 channel);                             /* the fields now shown, or null for `fields` */
+    u32 zoned;                                             /* edits per-zone settings: the zone label and EDIT scope */
+    /* Redraws the graph (the EQ graph's box) when CV moved what it shows; nonzero
+     * when it drew. Called at the EQ graph's live rate, or null. */
+    u32 (*live)(u32 channel);
 };
+/* The pages Phase Mod steps to from its own page, and those Envelope steps to. */
 extern const struct panel_page *volatile patch_panel_page;
+extern const struct panel_page *volatile patch_envelope_page;
+/* The EDIT scope the EQ pages share: editing a zone's settings (nonzero) or the channel's. */
+u32 panel_scope_zone(void);
+u32 panel_selected_zone(void);
+u32 panel_selected_channel(void);
+void panel_toggle_scope(void);
 
 /* eq_panel.c: a page of CV routes in the stock style, two to a row. The
  * cursor counts each route's source, then its amount. */
 void panel_cv_route(u32 route, const char *title, s32 source, s32 amount, u32 cursor);
 void panel_cv_popup(u32 cursor, const char *name, s32 source, s32 amount, const char *per_volt);
+/* One route's source and amount on a line at (x, y) with the amount's bar
+ * under it; `selected` is 1 for the source, 2 for the amount. Its popup, the
+ * popup's top at y. */
+void panel_cv_pair(s32 x, s32 y, s32 source, s32 amount, u32 selected, u32 gray);
+void panel_cv_popup_at(s32 y, u32 is_amount, const char *name, s32 source, s32 amount, const char *per_volt);
 
 void ui_draw_proportional_text(u32 font, s32 x, s32 y, const char *text,
                               u32 foreground, u32 background, u32 scale, u32 spacing);
@@ -47,5 +66,6 @@ void ui_draw_channel_current_zone_suffix(u32 *task);
 #define PAGE_HEIGHT (OLED_SIDE - PAGE_TOP)
 #define LEFT_X 12
 #define TITLE_Y 13
+#define ZONE_LABEL_X 107
 #define CV_COLUMN_X 70
 #endif

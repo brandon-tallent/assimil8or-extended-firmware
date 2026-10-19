@@ -16,6 +16,7 @@ static u32 state, reload;
 void (*volatile patch_grain_hook)(s32 *mix, const s32 *steps);
 s32 patch_grain_steps[AUDIO_CHANNELS], patch_grain_mix[AUDIO_CHANNELS];
 const struct panel_page *volatile patch_panel_page;
+const struct panel_page *volatile patch_envelope_page;
 static struct extension_header *loaded;
 
 int extension_persist(u8 *image, u32 bytes, u32 crc);
@@ -114,6 +115,7 @@ void extension_foreground_poll(void)
     loaded = 0; /* panel commands see no extension while it is replaced */
     patch_grain_hook = 0; /* no audio or panel IRQ is inside it while IRQs are masked */
     patch_panel_page = 0;
+    patch_envelope_page = 0;
     cpu_irq_restore(irq);
     reload = 0;
     state = load();

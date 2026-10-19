@@ -275,9 +275,10 @@ loads and sample jobs. While one runs, another replies Busy.
 | text, then `00` | The active folder's name |
 | u32 | Checksum of the channel and zone EQ |
 | u32 | Checksum of the grain settings |
+| u32 | Checksum of the channel and zone filters |
 
 Poll this to follow the module. When a checksum changes, read that part
-again. The two last checksums change when the settings do; they are not
+again. The three last checksums change when the settings do; they are not
 computed over the bytes any reply carries.
 
 **33 Read model.** u16 offset, u8 count (1–120). Reply: that many bytes of
@@ -443,6 +444,37 @@ follows its gain. Q step q is a bell of Q = 0.5 · 2^((q − 1) / 8), from 0.5
 to 16. A Q that makes a band a shelf also brings its gain inside ±10 dB. At
 an amount of 100 a volt moves a frequency one octave or a gain 2 dB.
 
+### Filter
+
+The zone byte is a zone 0…7, or 8 for the channel's filter, and a zone
+follows its channel as for the EQ. Stereo/Right channels play their master's
+filter.
+
+| ID | Parameter | Range |
+| ---: | --- | --- |
+| 128 | Type | 0 Off, 1 LP 24, 2 LP 12, 3 BP 24, 4 BP 12, 5 HP 24, 6 HP 12, 7 Notch 24, 8 Notch 12, 9 Band Stop, 10 Dual L/BP |
+| 129 | Cutoff | 20…20,000 Hz |
+| 130 | Resonance | 0…100: the damping k = 2(1 − r/100)^1.35, at least 0.05: Q 0.5 to 20 |
+| 131 | Extra | 0…100: see below |
+| 132 | Zone has its own filter | 0 follows the channel again, 1 own |
+| 133…136 | CV source for Cutoff, Resonance, Extra, Type | −4…23 |
+| 137…140 | CV amount for the same four | −100…100 |
+
+Extra is the type's own setting. Band Stop: how far above the cutoff its
+high-pass sits, 0.11 octave a step, so 0 is a notch at the cutoff. Dual
+L/BP: where its band-pass sits, 0.11 octave a step from 5.6 octaves below the
+cutoff, on it at 50. Both second filters stop at 20 kHz. The other types
+ignore Extra, and so does its CV route.
+
+The 24 dB types are two sections in series, and Resonance sets one: LP 24
+and HP 24 are a resonant section into one at Q 0.5, BP 24 a resonant
+band-pass into a low-pass at Q 0.5, and Notch 24 a notch of twice the Q into
+a broad one. Band Stop is a low-pass at the cutoff beside the high-pass, and
+Dual L/BP a low-pass beside the band-pass, each at half level; the
+band-passes play louder and Notch 12 at half level. At an amount of 100 a
+volt moves the cutoff two octaves, every frame, so 5 V crosses the whole
+range; Resonance and Extra 20 steps; and Type two types, never to Off.
+
 ### Grain
 
 Grain mode belongs to one channel at a time, or to a Master and its
@@ -509,6 +541,7 @@ beside it.
 | 3 | | Every zone's Sample info: 64 records of 14 bytes |
 | 4 | Nothing, or u16 first, u16 entries | The browsed folder's listing |
 | 5 | | The EQ: 72 records of 33 bytes |
+| 6 | | The filter: 72 records of 14 bytes |
 
 Each reply frame's data is u8 kind, u16 index (the byte offset, column,
 first entry or first record this frame starts at), then the data. A frame
@@ -517,6 +550,9 @@ that fails carries its result and ends the stream.
 An EQ record: u16 HPF, 3 × u16 frequency, 3 × s16 gain, u8 On, u8 own EQ,
 7 × s8 CV source, 7 × s8 CV amount, 3 × u8 Q. The records run channel by
 channel: zones 1–8, then the channel's own.
+
+A filter record: u8 type, u16 cutoff, u8 resonance, u8 extra, u8 own filter,
+4 × s8 CV source, 4 × s8 CV amount; the records run as the EQ's.
 
 ## Automation
 

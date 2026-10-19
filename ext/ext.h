@@ -182,6 +182,10 @@ u32 zone_remove(u32 channel, u32 zone);
 #define EQ_SLOT_CHANNEL           ZONES
 #define EQ_RECORDS                (PRESET_CHANNELS * EQ_SLOTS)
 #define EQ_RECORD_BYTES           33u
+/* The filter's records run as the EQ's: u8 type, u16 cutoff, u8 resonance,
+ * u8 extra, u8 own filter, 4 x s8 CV source, 4 x s8 CV amount (cutoff,
+ * resonance, extra, type). */
+#define FILTER_RECORD_BYTES       14u
 void eq_record(u32 index, u8 *out);
 
 /* grains.c: grain mode for one channel or stereo pair, playing the
@@ -231,6 +235,9 @@ void channel_stop(u32 channel);
 extern const struct panel_page grain_page;
 void grains_foreground(void);
 void grains_init(void);
+void filter_record(u32 index, u8 *out);
+void filter_page_init(void);
+void filter_page_foreground(void);
 
 /* resample.c: a channel's output recorded into one of its zones. */
 u32 resample_arm(u32 channel, u32 zone, u32 value, u32 sequence, u8 *out, u32 *count);

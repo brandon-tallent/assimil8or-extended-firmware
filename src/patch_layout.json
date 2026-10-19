@@ -110,6 +110,24 @@
    "site": "zone_editor_phase_modulation_parameter_set_normalized"
   },
   {
+   "address": "0x800158b0",
+   "instruction": "b",
+   "target": "envelope_panel_entry",
+   "site": "zone_editor_playback_control_primary_callback"
+  },
+  {
+   "address": "0x80021948",
+   "instruction": "b",
+   "target": "envelope_panel_render",
+   "site": "ui_render_channel_envelope_and_playback_page"
+  },
+  {
+   "address": "0x80033ad4",
+   "instruction": "b",
+   "target": "envelope_knob_hook",
+   "site": "zone_editor_playback_parameter_set_normalized"
+  },
+  {
    "address": "0x800565ec",
    "instruction": "b",
    "target": "preset_extras_parse_file",

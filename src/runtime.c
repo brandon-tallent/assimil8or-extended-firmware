@@ -137,6 +137,7 @@ void patch_foreground_pass(void)
     screenshot_foreground_poll();
     preset_extras_foreground();
     eq_foreground_poll();
+    filter_foreground_poll();
     extension_foreground_poll();
     counters.foreground_polls++;
     if (boot_mode == BOOT_TRIAL) watchdog_kick();

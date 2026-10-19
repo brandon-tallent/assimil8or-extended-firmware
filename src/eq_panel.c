@@ -10,6 +10,9 @@ void eq_render_stock(u32 *task);
 void phase_entry_stock(u32 *context, u32 argument);
 void phase_render_stock(u32 *task);
 void phase_panel_entry(u32 *context, u32 argument);
+void envelope_entry_stock(u32 *context, u32 argument);
+void envelope_render_stock(u32 *task);
+void envelope_panel_entry(u32 *context, u32 argument);
 void eq_value_bar(u32 object, s32 x, s32 y, u32 value_bits); /* entry.S: float in s0 */
 char *ui_format_cv_input_selector(char *dest, const signed short *selector, s32 channel);
 static char *format_source(char *dest, s32 source)
@@ -32,6 +35,8 @@ int sprintf(char *buffer, const char *format, ...);
 #define PANEL_PRESS 0x00u
 #define PANEL_PHASE_MOD 17u                 /* FRONT_PANEL_BINDING_PHASE_MODE_RECORD */
 #define PANEL_MUTATE 18u
+#define PANEL_ENVELOPE 25u                  /* FRONT_PANEL_ENVELOPE_RECORD_INDEX */
+#define PANEL_DOUBLE 0x20u                  /* FRONT_PANEL_RECORD_DOUBLE_CALLBACK */
 #define PANEL_ENTER 27u                     /* FRONT_PANEL_TRANSIENT_EDITOR_RECORD_INDEX */
 #define PANEL_SHORT_RELEASE 0x08u
 #define PANEL_HOLD 0x10u
@@ -43,7 +48,6 @@ int sprintf(char *buffer, const char *format, ...);
 #define COLOR_DARK_GRAY 0x0c63u
 #define COLOR_YELLOW 0xc0ffu
 /* Layout (pixels). */
-#define ZONE_LABEL_X 107
 #define GRAPH_LEFT 12
 #define GRAPH_TOP 24
 #define GRAPH_WIDTH 116
@@ -69,8 +73,9 @@ int sprintf(char *buffer, const char *format, ...);
 #define MARKER_SIZE 3
 #define CURVE_REFRESH_TICKS 40u            /* live curve under CV, ~25 Hz */
 
-/* PAGE_EXTRA and above are the extension's pages, in list order. */
-enum { PAGE_NONE, PAGE_EQ, PAGE_CV, PAGE_EXTRA };
+/* PAGE_EXTRA and above are the extension's pages, in list order: those Phase
+ * Mod steps to, then from PAGE_ENVELOPE those Envelope steps to. */
+enum { PAGE_NONE, PAGE_EQ, PAGE_CV, PAGE_EXTRA, PAGE_ENVELOPE = 64 };
 enum { FIELD_LOW_FREQUENCY, FIELD_MID_FREQUENCY, FIELD_HIGH_FREQUENCY,
        FIELD_LOW_GAIN, FIELD_MID_GAIN, FIELD_HIGH_GAIN, FIELD_LOW_Q, FIELD_MID_Q, FIELD_HIGH_Q,
        FIELD_HPF, FIELD_ON, FIELD_SCOPE, EQ_FIELD_COUNT };
@@ -87,8 +92,9 @@ u32 eq_panel_active(void) { return page != PAGE_NONE && editor(EDITOR_SELECTOR_P
 /* The extension's page being shown, or null: none shown, or the extension left. */
 static const struct panel_page *extra(void)
 {
-    const struct panel_page *shown = page >= PAGE_EXTRA ? patch_panel_page : 0;
-    for (u32 n = PAGE_EXTRA; shown && n < page; ++n) shown = shown->next;
+    u32 first = page >= PAGE_ENVELOPE ? PAGE_ENVELOPE : PAGE_EXTRA;
+    const struct panel_page *shown = page < PAGE_EXTRA ? 0 : page >= PAGE_ENVELOPE ? patch_envelope_page : patch_panel_page;
+    for (u32 n = first; shown && n < page; ++n) shown = shown->next;
     return shown;
 }
 static u32 channel(void) { return editor(ZONE_EDITOR_SELECTED_CHANNEL) & 7; }
@@ -102,7 +108,7 @@ static struct eq_value *value(void)
 static u32 field_count(void)
 {
     const struct panel_page *shown = extra();
-    return shown ? shown->fields : page == PAGE_CV ? CV_FIELD_COUNT : EQ_FIELD_COUNT;
+    return shown ? shown->count ? shown->count(channel()) : shown->fields : page == PAGE_CV ? CV_FIELD_COUNT : EQ_FIELD_COUNT;
 }
 void eq_panel_selection_changed(void)
 {
@@ -120,6 +126,26 @@ static void bind(u32 button, u32 offset, void (*callback)(u32 *, u32))
 {
     REG32(FRONT_PANEL_STATE + button*FRONT_PANEL_RECORD_SIZE + offset) = (u32)callback;
     REG32(FRONT_PANEL_STATE + button*FRONT_PANEL_RECORD_SIZE + offset + 4) = 0;
+}
+static void show(u32 next);
+static void leave(void);
+/* Envelope pressed on its own page or one of the extension's: the next page,
+ * and after the last the Envelope page again. A second press inside the
+ * double-press window is the stock zero-crossing toggle, which belongs to the
+ * loop pages; here the double binding is dropped so a press acts at once. */
+static void envelope_panel_step(u32 *context, u32 argument)
+{
+    page = eq_panel_active() && page >= PAGE_ENVELOPE ? page + 1 : PAGE_ENVELOPE;
+    if (extra()) show(page); else envelope_panel_entry(context, argument);
+}
+void envelope_panel_entry(u32 *context, u32 argument)
+{
+    envelope_entry_stock(context, argument);
+    leave();
+    if (patch_envelope_page) {
+        bind(PANEL_ENVELOPE, PANEL_SHORT_RELEASE, envelope_panel_step);
+        bind(PANEL_ENVELOPE, PANEL_DOUBLE, 0);
+    }
 }
 static void apply_value(struct eq_value *next);
 /* The value being edited, flat: the EQ page's fields at their defaults, its
@@ -162,6 +188,11 @@ static void clear_hold(u32 *context, u32 argument)
 {
     (void)context; (void)argument;
     if (!eq_panel_active()) return;
+    const struct panel_page *shown = extra();
+    if (shown) {
+        if (shown->hold) { shown->hold(channel(), field); value_edit = 0; revision++; }
+        return;
+    }
     struct eq_value next;
     switch (hold_action()) {
     case HOLD_FOLLOW:
@@ -195,9 +226,15 @@ static void sample_press(u32 *context, u32 argument)
     if (eq_panel_active() && shown && shown->sample) shown->sample(channel());
     else sample_setup_capture_state_transaction(context, argument);
 }
+u32 panel_scope_zone(void) { return edit_zone; }
+u32 panel_selected_zone(void) { return zone(); }
+u32 panel_selected_channel(void) { return channel(); }
+void panel_toggle_scope(void) { edit_zone ^= 1; revision++; }
 static void enter_release(u32 *context, u32 argument)
 {
     (void)context; (void)argument;
+    const struct panel_page *shown = extra();
+    if (shown && shown->enter && shown->enter(channel(), field)) { revision++; return; }
     /* ENTER on Edit switches scope; elsewhere it opens or closes the popup. */
     if (page == PAGE_EQ && field == FIELD_SCOPE) edit_zone ^= 1;
     else value_edit ^= 1;
@@ -321,14 +358,8 @@ void eq_panel_select(u32 *context, s32 delta)
         step(&next, field, delta);
         apply_value(&next);
     } else {
-        u32 was = field;
         field = (u32)clamp((s32)field+delta, 0, (s32)field_count()-1);
         value_edit = 0;
-        /* Unlike the EDIT field's HOLD:CLR heading, the EQ field's hint is a
-         * status notice: the EQ heading stays as is. */
-        u32 action = field != was && field == FIELD_ON ? hold_action() : HOLD_NONE;
-        if (action == HOLD_CLEAR) status_hint("Hold encoder to clear EQ");
-        else if (action == HOLD_RESTORE) status_hint("Hold encoder to restore EQ");
     }
     revision++;
 }
@@ -462,27 +493,42 @@ static const char *const mod_headings[EQ_MOD_COUNT] = {
     "LOW FREQ", "LOW GAIN", "MID FREQ", "MID GAIN", "HI FREQ", "HI GAIN", "HPF"};
 static const char *const mod_titles[EQ_MOD_COUNT] = {
     "Low Freq", "Low Gain", "Mid Freq", "Mid Gain", "High Freq", "High Gain", "HPF"};
+/* A CV source and amount on one line at (x, y), the amount's bar under it.
+ * `selected` is 1 for the source, 2 for the amount, else 0. */
+void panel_cv_pair(s32 x, s32 y, s32 source, s32 amount, u32 selected, u32 gray)
+{
+    char line[24];
+    for (u32 n = 0; n < 2; ++n) {
+        u32 on = selected == n + 1;
+        if (n) format_signed(line, amount, 2); else format_source(line, source);
+        ui_draw_proportional_text(UI_RENDER_DEFAULT_FONT_CONTEXT, x + (s32)n*CV_AMOUNT_DX, y, line,
+            on ? COLOR_BLACK : gray ? COLOR_GRAY : COLOR_WHITE, on ? COLOR_SELECTED : COLOR_BLACK, 1, 0);
+    }
+    union { float value; u32 bits; } bar = { .value = amount*CV_BAR_SCALE };
+    eq_value_bar(UI_VALUE_BAR_OBJECT, x+CV_AMOUNT_DX, y+CV_BAR_DY-CV_VALUE_DY, bar.bits);
+}
 /* A page of CV routes, two to a row: a route's heading, source, amount and
  * bar. The page's cursor counts source then amount for each route. */
 void panel_cv_route(u32 route, const char *title, s32 source, s32 amount, u32 cursor)
 {
-    char line[24];
     s32 x = route%2 ? CV_COLUMN_X : LEFT_X, y = CV_BLOCK_Y+(s32)(route/2)*CV_BLOCK_PITCH;
     heading(x, y, title);
-    value_text(x, y+CV_VALUE_DY, format_source(line, source), cursor == route*2);
-    format_signed(line, amount, 2);
-    value_text(x+CV_AMOUNT_DX, y+CV_VALUE_DY, line, cursor == route*2+1);
-    union { float value; u32 bits; } bar = { .value = amount*CV_BAR_SCALE };
-    eq_value_bar(UI_VALUE_BAR_OBJECT, x+CV_AMOUNT_DX, y+CV_BAR_DY, bar.bits);
+    panel_cv_pair(x, y+CV_VALUE_DY, source, amount, cursor == route*2 ? 1 : cursor == route*2+1 ? 2 : 0, following());
 }
-/* The edit popup for the cursor's field; `per_volt` follows an amount. */
-void panel_cv_popup(u32 cursor, const char *name, s32 source, s32 amount, const char *per_volt)
+/* The edit popup for a route's source or amount, its top at y; `per_volt`
+ * follows an amount. */
+void panel_cv_popup_at(s32 y, u32 is_amount, const char *name, s32 source, s32 amount, const char *per_volt)
 {
     char value_line[24], title[24];
-    sprintf(title, "%s Mod %s", name, cursor%2 ? "Amount" : "Source");
-    if (cursor%2) format_signed(value_line, amount, 2); else format_source(value_line, source);
-    ui_render_parameter_row(UI_PARAMETER_ROW_STYLE, 0, CV_BLOCK_Y+(s32)(cursor/4)*CV_BLOCK_PITCH+CV_POPUP_DY,
-                            value_line, title, cursor%2 ? per_volt : "", 0, POPUP_BACKGROUND_FROM_STYLE, 0);
+    sprintf(title, "%s Mod %s", name, is_amount ? "Amount" : "Source");
+    if (is_amount) format_signed(value_line, amount, 2); else format_source(value_line, source);
+    ui_render_parameter_row(UI_PARAMETER_ROW_STYLE, 0, y, value_line, title, is_amount ? per_volt : "", 0,
+                            POPUP_BACKGROUND_FROM_STYLE, 0);
+}
+/* The edit popup for the cursor's field on a page of routes. */
+void panel_cv_popup(u32 cursor, const char *name, s32 source, s32 amount, const char *per_volt)
+{
+    panel_cv_popup_at(CV_BLOCK_Y+(s32)(cursor/4)*CV_BLOCK_PITCH+CV_POPUP_DY, cursor%2, name, source, amount, per_volt);
 }
 static void draw_cv_page(const struct eq_value *v)
 {
@@ -544,9 +590,16 @@ static void render(u32 *task)
         if (!settled || (u32)(now - curve_at) >= CURVE_REFRESH_TICKS) { curve_at = now; eq_modulate(v, ch, &live); }
         else live = drawn_live;
     }
+    if (settled && shown && shown->live && (u32)(now - curve_at) >= CURVE_REFRESH_TICKS) {
+        curve_at = now;
+        REG32(OLED_TRANSFER_BATCH_GATE)++;
+        u32 drew = shown->live(ch);
+        REG32(OLED_TRANSFER_BATCH_GATE)--;
+        if (drew) oled_enqueue_transfer(OLED_TRANSFER_KIND_RECT, GRAPH_LEFT, GRAPH_TOP, GRAPH_WIDTH, GRAPH_HEIGHT);
+    }
     u32 graph_only = settled && memcmp(&drawn_live, &live, sizeof(live));
     if (settled && !graph_only) {
-        if (page == PAGE_EQ) ui_draw_channel_current_zone_suffix(task);
+        if (page == PAGE_EQ || (shown && shown->zoned)) ui_draw_channel_current_zone_suffix(task);
         return;
     }
     drawn_status = status; drawn_revision = revision; drawn_channel = ch; drawn_zone = z;
@@ -563,7 +616,10 @@ static void render(u32 *task)
     ui_draw_channel_mix_strip(0, ch);
     if (page == PAGE_EQ) { draw_graph(&live); draw_eq_page(task, v); }
     else if (page == PAGE_CV) draw_cv_page(v);
-    else shown->draw(ch, field, value_edit);
+    else {
+        shown->draw(ch, field, value_edit);
+        if (shown->zoned) ui_draw_channel_current_zone_suffix(task);
+    }
     if (value_edit && !shown) draw_popup(v);
     REG32(OLED_TRANSFER_BATCH_GATE)--;
     oled_enqueue_transfer(OLED_TRANSFER_KIND_RECT, 0, PAGE_TOP, OLED_SIDE, PAGE_HEIGHT);
@@ -571,6 +627,11 @@ static void render(u32 *task)
 void eq_panel_render(u32 *task)
 {
     if (eq_panel_active()) render(task); else eq_render_stock(task);
+}
+void envelope_panel_render(u32 *task)
+{
+    if (eq_panel_active() && !extra()) leave();
+    if (eq_panel_active()) render(task); else envelope_render_stock(task);
 }
 void phase_panel_render(u32 *task)
 {

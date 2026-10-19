@@ -138,3 +138,169 @@ void eq_curve(const struct eq_value *value, u32 points, u8 *out, s32 top, s32 bo
         out[n] = (u8)(y < top ? top : y > bottom ? bottom : y);
     }
 }
+
+/* The channel filter (filter.S; the model is tools/svf_model.py). A section's
+ * trapezoidal coefficients follow from g = tan(pi f / fs) and the damping
+ * k = 1/Q. A filter type chooses the taps of section 1 that feed section 2
+ * (mix 1) and the taps of section 2 and its input, and section 1's lowpass,
+ * that reach the output (mix 2). Ahead of the sections a type may shape the
+ * input, hold it, or modulate section 1's cutoff by another channel.
+ *
+ * The types, their levels, the resonance law and Extra's laws follow the
+ * Microwave XT's Filter 1 as rendered on its emulated firmware: resonance
+ * takes the damping from 2 (Q 0.5) toward 0 as 2(1 - r)^1.35; the 24 dB
+ * types resonate in one section and hold the other at 2; and Extra (Spread, Offset) moves
+ * Band Stop's and Dual L/BP's second filter by 2^(steps / 9.06), the XT's
+ * 11.5 steps an octave on its 0..127 scale. */
+#define FILTER_DAMPING_MAX 2.0           /* resonance 0: critically damped */
+#define FILTER_DAMPING_MIN 0.05          /* resonance 100: Q 20 */
+#define FILTER_DAMPING_POWER 1.35
+#define FILTER_DAMPING_FIXED 2.0         /* the 24 dB types' second section */
+#define FILTER_EXTRA_OCTAVES_PER_STEP 0.1104 /* 127 / (100 * 11.5) */
+#define FILTER_DUAL_CENTRE 50.4          /* Extra at which Dual's band-pass sits on the cutoff */
+#define Q30_SCALE 1073741824.0
+#define Q31_SCALE 2147483648.0
+#define Q32_SCALE 4294967296.0
+enum { MIX_INPUT, MIX_LP, MIX_BP, MIX_HP, MIX_LP1, MIX_WEIGHTS };
+struct filter_design {
+    double cutoff[2], damping[2], mix1[4], mix2[MIX_WEIGHTS]; /* mix1 has no MIX_LP1 */
+};
+const char *filter_extra_name(u32 type)
+{
+    switch (type) {
+    case FILTER_BAND_STOP: return "SPREAD";
+    case FILTER_DUAL: return "OFFSET";
+    default: return 0;
+    }
+}
+static void filter_design(const struct filter_value *v, struct filter_design *d)
+{
+    memset(d, 0, sizeof(*d));
+    double r = v->resonance*(1.0/FILTER_RESONANCE_MAX);
+    double k = r < 1 ? FILTER_DAMPING_MAX*exponential(FILTER_DAMPING_POWER*logarithm(1 - r)) : 0;
+    if (k < FILTER_DAMPING_MIN) k = FILTER_DAMPING_MIN;
+    d->cutoff[0] = d->cutoff[1] = v->cutoff;
+    d->damping[0] = d->damping[1] = k;
+    switch (v->type) {
+    case FILTER_LP24:
+        d->mix1[MIX_LP] = 1; d->mix2[MIX_LP] = 1; d->damping[1] = FILTER_DAMPING_FIXED;
+        break;
+    case FILTER_LP12: d->mix1[MIX_LP] = 1; d->mix2[MIX_INPUT] = 1; break;
+    case FILTER_BP24:
+        /* A band-pass into a fixed low-pass; the XT's level, 2.1, split between them. */
+        d->mix1[MIX_BP] = 1.45; d->mix2[MIX_LP] = 1.45; d->damping[1] = FILTER_DAMPING_FIXED;
+        break;
+    case FILTER_BP12: d->mix1[MIX_BP] = 1.8; d->mix2[MIX_INPUT] = 1; break;
+    case FILTER_HP24:
+        d->mix1[MIX_HP] = 1; d->mix2[MIX_HP] = 1; d->damping[1] = FILTER_DAMPING_FIXED;
+        break;
+    case FILTER_HP12: d->mix1[MIX_HP] = 0.95; d->mix2[MIX_INPUT] = 1; break;
+    case FILTER_NOTCH24:
+        /* A sharp notch into a broad one. */
+        d->mix1[MIX_LP] = d->mix1[MIX_HP] = 1; d->mix2[MIX_LP] = d->mix2[MIX_HP] = 1.15;
+        d->damping[0] = k*0.5; d->damping[1] = FILTER_DAMPING_FIXED + 0.85*k;
+        break;
+    case FILTER_NOTCH12: d->mix1[MIX_LP] = d->mix1[MIX_HP] = 0.51; d->mix2[MIX_INPUT] = 1; break;
+    case FILTER_BAND_STOP:
+        /* A low-pass on the cutoff beside a high-pass Spread above it. */
+        d->mix1[MIX_INPUT] = 1; d->mix2[MIX_LP1] = 0.5; d->mix2[MIX_HP] = 0.55;
+        d->damping[0] = k*0.5; d->damping[1] = k*1.25 < 1.1 ? k*1.25 : 1.1;
+        d->cutoff[1] = v->cutoff*exponential(v->extra*FILTER_EXTRA_OCTAVES_PER_STEP*0.6931471805599453);
+        break;
+    case FILTER_DUAL:
+        /* A low-pass on the cutoff beside a band-pass that Offset moves either way. */
+        d->damping[0] = k*0.5; d->damping[1] = k*1.25 < 1.1 ? k*1.25 : 1.1;
+        d->mix1[MIX_INPUT] = 1; d->mix2[MIX_LP1] = 0.5; d->mix2[MIX_BP] = 0.5*d->damping[1];
+        d->cutoff[1] = v->cutoff*exponential((v->extra - FILTER_DUAL_CENTRE)*FILTER_EXTRA_OCTAVES_PER_STEP*0.6931471805599453);
+        break;
+    default: break;
+    }
+}
+static s32 q30(double x)
+{
+    x *= Q30_SCALE;
+    return x >= 2147483647.0 ? 2147483647 : x <= -2147483648.0 ? (s32)-2147483648.0 : (s32)(x + (x < 0 ? -0.5 : 0.5));
+}
+static s32 q31(double x)
+{
+    x *= Q31_SCALE;
+    return x >= 2147483647.0 ? 2147483647 : x <= -2147483648.0 ? (s32)-2147483648.0 : (s32)(x + (x < 0 ? -0.5 : 0.5));
+}
+static double section_g(double cutoff)
+{
+    double x = (cutoff > EQ_FREQUENCY_MAX ? EQ_FREQUENCY_MAX : cutoff)*(3.141592653589793/48000);
+    return sine(x)/cosine(x);
+}
+static void filter_section(s32 *out, double cutoff, double damping)
+{
+    double g = section_g(cutoff), a1 = 1/(1 + g*(g + damping)), a2 = g*a1;
+    out[0] = q31(a1); out[1] = q31(a2); out[2] = q31(g*a2); out[3] = q31(damping*0.25);
+}
+static s32 float_bits(float x)
+{
+    union { float f; s32 bits; } u = { .f = x };
+    return u.bits;
+}
+/* One lane's vectors, a word each: the caller stores them into its lane. */
+void filter_lane(const struct filter_value *v, s32 out[FILTER_VECTORS])
+{
+    struct filter_design d;
+    filter_design(v, &d);
+    memset(out, 0, FILTER_VECTORS*sizeof(s32));
+    out[FILTER_VECTOR_MASK] = v->type == FILTER_OFF ? 0 : -1;
+    filter_section(&out[FILTER_VECTOR_SECTION_1], d.cutoff[0], d.damping[0]);
+    filter_section(&out[FILTER_VECTOR_SECTION_2], d.cutoff[1], d.damping[1]);
+    for (u32 n = 0; n < 4; ++n) {
+        out[FILTER_VECTOR_MIX_1 + n] = q30(d.mix1[n]);
+        out[FILTER_VECTOR_MIX_2 + n] = q30(d.mix2[n]);
+    }
+    out[FILTER_VECTOR_MIX_2_LP1] = q30(d.mix2[MIX_LP1]);
+    /* A lane whose cutoff CV moves it has its coefficients worked out each
+     * frame from these bases; the caller sets the CV and the mask (eq_model.c). */
+    out[FILTER_VECTOR_G1] = float_bits((float)section_g(d.cutoff[0]));
+    out[FILTER_VECTOR_G2] = float_bits((float)section_g(d.cutoff[1]));
+    out[FILTER_VECTOR_K1] = float_bits((float)d.damping[0]);
+    out[FILTER_VECTOR_K2] = float_bits((float)d.damping[1]);
+}
+/* A section's taps at frequency w (radians per sample): with s = j*t the
+ * lowpass is 1/d, the bandpass s/d and the highpass s*s/d, d = s*s + k*s + 1. */
+static void filter_taps(double cutoff, double damping, double w, double lp[2], double bp[2], double hp[2])
+{
+    double x = (cutoff > EQ_FREQUENCY_MAX ? EQ_FREQUENCY_MAX : cutoff)*(3.141592653589793/48000);
+    double t = (sine(w*0.5)/cosine(w*0.5))*cosine(x)/sine(x);
+    double dr = 1 - t*t, di = damping*t, n = dr*dr + di*di;
+    lp[0] = dr/n; lp[1] = -di/n;
+    bp[0] = di*t/n; bp[1] = dr*t/n;                 /* j*t / d */
+    hp[0] = -t*t*dr/n; hp[1] = t*t*di/n;            /* -t*t / d */
+}
+/* The type's response in dB, rows top..bottom spanning db_top..db_bottom,
+ * at points logarithmically spaced from 20 Hz to 20 kHz. */
+void filter_curve(const struct filter_value *value, u32 points, u8 *out, s32 top, s32 bottom, s32 db_top, s32 db_bottom)
+{
+    struct filter_design d;
+    filter_design(value, &d);
+    double frequency = EQ_FREQUENCY_MIN, multiplier = exponential(6.907755278982137/(points-1));
+    for (u32 n = 0; n < points; ++n, frequency *= multiplier) {
+        double w = frequency*(6.283185307179586/48000);
+        double a[2][2] = {{d.mix1[MIX_INPUT], 0}, {d.mix2[MIX_INPUT], 0}}, lp1[2] = {0, 0};
+        for (u32 section = 0; section < 2; ++section) {
+            double lp[2], bp[2], hp[2];
+            filter_taps(d.cutoff[section], d.damping[section], w, lp, bp, hp);
+            const double *m = section ? d.mix2 : d.mix1;
+            for (u32 part = 0; part < 2; ++part) {
+                a[section][part] += m[MIX_LP]*lp[part] + m[MIX_BP]*bp[part] + m[MIX_HP]*hp[part];
+                if (!section) lp1[part] = lp[part];
+            }
+        }
+        /* Section 2 after section 1, plus section 1's lowpass beside it. */
+        double re = a[0][0]*a[1][0] - a[0][1]*a[1][1] + d.mix2[MIX_LP1]*lp1[0];
+        double im = a[0][0]*a[1][1] + a[0][1]*a[1][0] + d.mix2[MIX_LP1]*lp1[1];
+        double magnitude = re*re + im*im;
+        if (magnitude < 1e-12) magnitude = 1e-12;
+        double decibels = logarithm(magnitude)*(10/2.302585092994046);
+        double rows = (db_top - decibels)*(bottom - top)/(db_top - db_bottom);
+        s32 y = top + (s32)(rows + (rows < 0 ? -0.5 : 0.5));
+        out[n] = (u8)(y < top ? top : y > bottom ? bottom : y);
+    }
+}
+u16 eq_frequency_from_q16(u32 q16) { return eq_frequency(q16*(1.0f/65536)); }

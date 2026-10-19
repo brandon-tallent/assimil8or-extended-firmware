@@ -288,8 +288,11 @@ trampoline_end:
     b \target + 4
 .endm
 .global phase_knob_hook, phase_entry_stock, phase_render_stock
+.global envelope_knob_hook, envelope_entry_stock, envelope_render_stock
+.equ ZONE_EDITOR_PLAYBACK_PARAMETER_SELECTOR, 0xfc
 KNOB_HOOK eq_knob_hook, zone_editor_bit_parameter_set_normalized, ldr r3, [r0, #ZONE_EDITOR_BIT_PARAMETER_SELECTOR]
 KNOB_HOOK phase_knob_hook, zone_editor_phase_modulation_parameter_set_normalized, ldr r2, [r0, #ZONE_EDITOR_PHASE_MODULATION_PARAMETER_SELECTOR]
+KNOB_HOOK envelope_knob_hook, zone_editor_playback_parameter_set_normalized, ldr r1, [r0, #ZONE_EDITOR_PLAYBACK_PARAMETER_SELECTOR]
 .equ EDITOR_SELECTOR_PAGE_STATE, 0x58
  phase_entry_stock:
     ldr r3, [r0, #EDITOR_SELECTOR_PAGE_STATE]
@@ -297,6 +300,12 @@ KNOB_HOOK phase_knob_hook, zone_editor_phase_modulation_parameter_set_normalized
  phase_render_stock:
     push {r4-r10, lr}
     b ui_render_channel_phase_modulation_page + 4
+ envelope_entry_stock:
+    ldr r3, [r0, #EDITOR_SELECTOR_PAGE_STATE]
+    b zone_editor_playback_control_primary_callback + 4
+ envelope_render_stock:
+    push {r4-r11, lr}
+    b ui_render_channel_envelope_and_playback_page + 4
  eq_channel_select_hook:
     push {r4, lr}
     bl eq_channel_select_stock

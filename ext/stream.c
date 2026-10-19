@@ -9,9 +9,9 @@
  *
  * Every frame: u8 status, u8 kind, u16 index, then data. The index is the
  * byte offset (model), column (peaks), channel (samples), first entry
- * (browsed folder) or first record (EQ). A failed frame carries its status and ends the stream. */
+ * (browsed folder) or first record (EQ, filter). A failed frame carries its status and ends the stream. */
 
-enum { STREAM_MODEL, STREAM_ZONE_PEAKS, STREAM_FILE_PEAKS, STREAM_SAMPLES, STREAM_FOLDER, STREAM_EQ };
+enum { STREAM_MODEL, STREAM_ZONE_PEAKS, STREAM_FILE_PEAKS, STREAM_SAMPLES, STREAM_FOLDER, STREAM_EQ, STREAM_FILTER };
 #define STREAM_HEADER        3u  /* kind, u16 index */
 #define STREAM_DATA          (REPLY_BYTES - 1u - STREAM_HEADER)
 #define STREAM_REQUEST_MAX   48u
@@ -20,6 +20,7 @@ enum { STREAM_MODEL, STREAM_ZONE_PEAKS, STREAM_FILE_PEAKS, STREAM_SAMPLES, STREA
 #define PEAK_COLUMNS_LIMIT   702u /* the editor's waveform width in pixels */
 #define SAMPLE_INFO_BYTES    14u
 #define STREAM_EQ_RECORDS    (STREAM_DATA / EQ_RECORD_BYTES)
+#define STREAM_FILTER_RECORDS (STREAM_DATA / FILTER_RECORD_BYTES)
 #define FOLDER_LIST_HEADER   3u  /* u16 first index, u8 flags */
 #define FOLDER_ENTRY_HEADER  10u
 #define FOLDER_LIST_END      0x01u
@@ -75,6 +76,9 @@ static u32 start(void)
         stream.end = stream.bytes == 5 ? stream.index + get_u16(p + 3) : ~0u;
         return stream.end > stream.index ? OK : BAD_RANGE;
     case STREAM_EQ:
+        stream.end = EQ_RECORDS;
+        return stream.bytes == 1 ? OK : BAD_LENGTH;
+    case STREAM_FILTER:
         stream.end = EQ_RECORDS;
         return stream.bytes == 1 ? OK : BAD_LENGTH;
     }
@@ -141,6 +145,12 @@ static int next_frame(void)
         count = stream.end - stream.index < STREAM_EQ_RECORDS ? stream.end - stream.index : STREAM_EQ_RECORDS;
         for (u32 r = 0; r < count; ++r) eq_record(stream.index + r, data + r * EQ_RECORD_BYTES);
         send(OK, data, count * EQ_RECORD_BYTES);
+        stream.index += count;
+        break;
+    case STREAM_FILTER:
+        count = stream.end - stream.index < STREAM_FILTER_RECORDS ? stream.end - stream.index : STREAM_FILTER_RECORDS;
+        for (u32 r = 0; r < count; ++r) filter_record(stream.index + r, data + r * FILTER_RECORD_BYTES);
+        send(OK, data, count * FILTER_RECORD_BYTES);
         stream.index += count;
         break;
     case STREAM_FOLDER: {

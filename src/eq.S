@@ -134,6 +134,7 @@ patch_channel_eq:
     vpush {d0-d7}
     vpush {d12-d15}
     vpush {d16-d31}
+    bl patch_filter
     ldr r12, =eq_mailbox
     ldr r7, [r12, #4]
     cmp r7, #0

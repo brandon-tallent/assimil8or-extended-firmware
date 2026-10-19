@@ -143,5 +143,5 @@ static void position_route(u32 channel, u32 cursor, u32 q16)
                   cursor & 1u ? linear(-EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX, q16) : linear(EQ_CV_SOURCE_OFF, EQ_CV_SOURCE_MAX, q16));
 }
 
-static const struct panel_page routes_page = {2 * GRAIN_ROUTES, draw_routes, step_route, position_route, grain_revision, resample_button, 0};
-const struct panel_page grain_page = {GRAIN_FIELDS, draw, step, position, grain_revision, resample_button, &routes_page};
+static const struct panel_page routes_page = {2 * GRAIN_ROUTES, draw_routes, step_route, position_route, grain_revision, resample_button, 0, 0, 0, 0, 0, 0};
+const struct panel_page grain_page = {GRAIN_FIELDS, draw, step, position, grain_revision, resample_button, &routes_page, 0, 0, 0, 0, 0};
