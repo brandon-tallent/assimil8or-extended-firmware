@@ -29,6 +29,8 @@ void commands_handle(u32 command, u32 sequence, const u8 *p, u32 bytes)
         put_u32(out + 24, boot_mode);
         put_u32(out + 28, boot_trial_failed);
         count = 32 + extension_identity(out + 32);
+        memcpy(out + count, patch_version, PATCH_VERSION_BYTES);
+        count += PATCH_VERSION_BYTES;
         break;
     case CMD_DIAGNOSTICS: {
         if (bytes > 1) { status = BAD_LENGTH; break; }

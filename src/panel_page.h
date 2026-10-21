@@ -16,7 +16,7 @@ struct panel_page {
     void (*sample)(u32 channel);                           /* the Sample button here, in place of a stock take */
     const struct panel_page *next;                         /* the page after this one, or null */
     u32 (*enter)(u32 channel, u32 field);                  /* ENTER, before the stock popup: nonzero if handled */
-    void (*hold)(u32 channel, u32 field);                  /* ENTER held, or null */
+    u32 (*hold)(u32 channel, u32 field);                   /* ENTER held and let go unturned: nonzero if it acted, or null */
     u32 (*count)(u32 channel);                             /* the fields now shown, or null for `fields` */
     u32 zoned;                                             /* edits per-zone settings: the zone label and EDIT scope */
     /* Redraws the graph (the EQ graph's box) when CV moved what it shows; nonzero
@@ -31,6 +31,17 @@ u32 panel_scope_zone(void);
 u32 panel_selected_zone(void);
 u32 panel_selected_channel(void);
 void panel_toggle_scope(void);
+/* Coarse steps: turning the encoder while its switch is pressed, like
+ * stock Pitch's semitone steps.
+ * panel_coarse: nonzero while the switch is pressed.
+ * panel_step: value + delta normally. While pressed, moves delta steps of
+ *   `coarse` units, landing on multiples of `coarse` counted from `anchor`.
+ *   The caller clamps the result. */
+u32 panel_coarse(void);
+s32 panel_step(s32 value, s32 delta, s32 coarse, s32 anchor);
+/* Nonzero when the Stereo/Right channel's button selected the pair's right
+ * side. Stock selects the master channel in either case. */
+u32 panel_stereo_right(void);
 
 /* eq_panel.c: a page of CV routes in the stock style, two to a row. The
  * cursor counts each route's source, then its amount. */

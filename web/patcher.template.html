@@ -28,19 +28,21 @@ small { display:block; color:#535d57; font-size:.875rem; margin-top:.8rem; }
 [hidden] { display:none !important; }
 footer { color:#535d57; font-size:.875rem; }
 .filename { overflow-wrap:anywhere; }
+.version { color:#535d57; margin:-1rem 0 1.5rem; }
 </style>
 
 </head>
 <body>
 <main>
 <h1>Assimil8or<br>firmware extension</h1>
+<p class="version">Version {{VERSION}} · <a href="https://github.com/brandon-tallent/assimil8or-extended-firmware/blob/main/CHANGELOG.md">What’s new</a></p>
 <p>Download <a href="https://www.rossum-electro.com/products/assimil8or/">Rossum’s Assimil8or software v3.04</a> (<span class="filename">app-v304-260610.zip</span>) from the Downloads section, then select the zip below. A zip with your two software files will download automatically.</p>
 <div class="picker">
 <label for="firmware">Rossum’s v3.04 download</label>
 <input type="file" id="firmware" aria-describedby="privacy status">
 <small id="privacy">Your file stays in your browser. Nothing is uploaded. This tool also works offline.</small>
 <p id="status" role="status" aria-live="polite"></p>
-<a id="download" download="assimil8or-tallent-edition.zip" hidden>Download software files</a>
+<a id="download" download="assimil8or-tallent-edition-{{VERSION}}.zip" hidden>Download software files</a>
 <noscript><p>Enable JavaScript to prepare the software in your browser.</p></noscript>
 </div>
 <footer>

@@ -40,7 +40,10 @@ int sprintf(char *buffer, const char *format, ...);
 #define PANEL_ENTER 27u                     /* FRONT_PANEL_TRANSIENT_EDITOR_RECORD_INDEX */
 #define PANEL_SHORT_RELEASE 0x08u
 #define PANEL_HOLD 0x10u
+#define PANEL_ACCEPTED_RELEASE 0x18u      /* FRONT_PANEL_RECORD_ACCEPTED_RELEASE_CALLBACK: let go after the hold */
 #define PANEL_CALLBACK_SLOTS_END 0x28u
+#define PANEL_HOLD_TICKS 0x30u             /* FRONT_PANEL_RECORD_HOLD_TICKS, a halfword */
+#define PANEL_SELECTOR_HOLD_TICKS 750u     /* FRONT_PANEL_SELECTOR_HOLD_TICKS, as stock value screens */
 #define PANEL_PRESSED 0x34u                 /* FRONT_PANEL_RECORD_INPUT_CURRENT */
 #define PANEL_INPUT_PREVIOUS 0x35u
 #define COLOR_GRAY 0x14a5u
@@ -72,6 +75,13 @@ int sprintf(char *buffer, const char *format, ...);
 #define CV_BAR_SCALE 0.05f                 /* +1.00 fills the bar's half width */
 #define MARKER_SIZE 3
 #define CURVE_REFRESH_TICKS 40u            /* live curve under CV, ~25 Hz */
+/* Push-turn steps: a semitone of frequency, a dB, an octave of Q, 10 Hz of
+ * high-pass and 0.10 of a CV amount. */
+#define SEMITONES_PER_OCTAVE 12
+#define FREQUENCY_COARSE (EQ_STEPS_PER_OCTAVE/SEMITONES_PER_OCTAVE)
+#define GAIN_COARSE 10
+#define HPF_COARSE 10
+#define AMOUNT_COARSE 10
 
 /* PAGE_EXTRA and above are the extension's pages, in list order: those Phase
  * Mod steps to, then from PAGE_ENVELOPE those Envelope steps to. */
@@ -82,6 +92,8 @@ enum { FIELD_LOW_FREQUENCY, FIELD_MID_FREQUENCY, FIELD_HIGH_FREQUENCY,
 #define CV_FIELD_COUNT (EQ_MOD_COUNT*2)
 
 static u32 page, field, edit_zone, value_edit, revision, drawn_revision, opening_press;
+static u32 turned;                          /* the encoder turned while ENTER was held */
+static u32 stereo_right;                    /* the Stereo/Right button selected the right side */
 static u32 host = BITS_PAGE_STATE;          /* the stock page state ours are shown under */
 static u32 curve_at, extra_revision;
 static struct eq_value drawn_live;
@@ -110,17 +122,35 @@ static u32 field_count(void)
     const struct panel_page *shown = extra();
     return shown ? shown->count ? shown->count(channel()) : shown->fields : page == PAGE_CV ? CV_FIELD_COUNT : EQ_FIELD_COUNT;
 }
+static u32 stereo_right_of(u32 ch)
+{
+    return ch + 1 < 8 && BYTE(EQ_CHANNEL_RECORDS + (ch + 1)*EQ_CHANNEL_BYTES + EQ_CHANNEL_MODE) == EQ_CHANNEL_MODE_STEREO_RIGHT;
+}
+u32 panel_stereo_right(void) { return stereo_right && stereo_right_of(channel()); }
 void eq_panel_selection_changed(void)
 {
-    if (eq_panel_active()) revision++;
+    if (!eq_panel_active()) return;
+    revision++;
+    /* Stock selects the master instead and shows a notice. Here the press
+     * selected the right side, which the page already shows, so clear the
+     * notice. */
+    if (panel_stereo_right() && BYTE(UI_OPERATION_STATUS_STATE + UI_OPERATION_STATUS_MODE) == UI_OPERATION_STATUS_MODE_TIMED)
+        BYTE(UI_OPERATION_STATUS_STATE + UI_OPERATION_STATUS_MODE) = UI_OPERATION_STATUS_MODE_IDLE;
 }
-void eq_panel_channel_gesture(void)
+/* Called on a channel button press, before stock handles it. button: 0-7. */
+void eq_panel_channel_gesture(u32 *context, u32 button)
 {
+    (void)context;
     u32 mutate = FRONT_PANEL_STATE + PANEL_MUTATE*FRONT_PANEL_RECORD_SIZE;
-    /* Stock dispatch visits Gate records before Mutate. Consume its pending
-     * release after a Mute chord so it cannot also change the page. */
+    /* Stock checks the channel buttons before Mutate. After a Mutate+channel
+     * mute chord, mark Mutate's release as handled so it does not also
+     * change the page. */
     if (editor(EDITOR_SELECTOR_PAGE_STATE) == BITS_PAGE_STATE && BYTE(mutate + PANEL_PRESSED))
         BYTE(mutate + PANEL_INPUT_PREVIOUS) = 1;
+    else if (eq_panel_active() && button < 8) {
+        stereo_right = button && stereo_right_of(button - 1);
+        revision++;
+    }
 }
 static void bind(u32 button, u32 offset, void (*callback)(u32 *, u32))
 {
@@ -129,6 +159,16 @@ static void bind(u32 button, u32 offset, void (*callback)(u32 *, u32))
 }
 static void show(u32 next);
 static void leave(void);
+u32 panel_coarse(void) { return BYTE(FRONT_PANEL_STATE + PANEL_ENTER*FRONT_PANEL_RECORD_SIZE + PANEL_PRESSED) != 0; }
+s32 panel_step(s32 value, s32 delta, s32 coarse, s32 anchor)
+{
+    if (!panel_coarse() || coarse <= 1 || !delta) return value + delta;
+    /* Round to the grid point at or below (up when going down), then step. */
+    s32 offset = value - anchor;
+    s32 below = offset >= 0 ? offset/coarse*coarse : -((coarse - 1 - offset)/coarse*coarse);
+    if (delta < 0 && below != offset) below += coarse;
+    return anchor + below + delta*coarse;
+}
 /* Envelope pressed on its own page or one of the extension's: the next page,
  * and after the last the Envelope page again. A second press inside the
  * double-press window is the stock zero-crossing toggle, which belongs to the
@@ -184,13 +224,19 @@ static u32 hold_action(void)
     if (memcmp(&next, value(), sizeof(next))) return HOLD_CLEAR;
     return held_owner == owner() ? HOLD_RESTORE : HOLD_NONE;
 }
+/* ENTER pressed: clear the turned flag. If the encoder turns before ENTER
+ * is released, the release does nothing. */
+static void enter_press(u32 *context, u32 argument) { (void)context; (void)argument; turned = 0; }
+/* Hold time reached: do nothing yet. The hold action runs on release
+ * (clear_hold), and only if the encoder did not turn. */
+static void enter_held(u32 *context, u32 argument) { (void)context; (void)argument; }
 static void clear_hold(u32 *context, u32 argument)
 {
     (void)context; (void)argument;
-    if (!eq_panel_active()) return;
+    if (!eq_panel_active() || turned) return;
     const struct panel_page *shown = extra();
     if (shown) {
-        if (shown->hold) { shown->hold(channel(), field); value_edit = 0; revision++; }
+        if (shown->hold && shown->hold(channel(), field)) { value_edit = 0; revision++; }
         return;
     }
     struct eq_value next;
@@ -233,6 +279,7 @@ void panel_toggle_scope(void) { edit_zone ^= 1; revision++; }
 static void enter_release(u32 *context, u32 argument)
 {
     (void)context; (void)argument;
+    if (turned) return;
     const struct panel_page *shown = extra();
     if (shown && shown->enter && shown->enter(channel(), field)) { revision++; return; }
     /* ENTER on Edit switches scope; elsewhere it opens or closes the popup. */
@@ -255,15 +302,19 @@ static void show(u32 next)
 {
     host = editor(EDITOR_SELECTOR_PAGE_STATE);
     page = next;
-    field = value_edit = 0;
+    field = value_edit = stereo_right = 0;
     REG32(EQ_EDITOR + EDITOR_SELECTOR_ADJUST_CALLBACK) = (u32)eq_panel_select;
     REG32(EQ_EDITOR + EDITOR_SELECTOR_ADJUST_WORD) = 0;
     bind(PANEL_SAMPLE, PANEL_PRESS, sample_press);
     /* Remove the stock value/hold callbacks without introducing a
      * double-press binding, which would defer every short release. */
     for (u32 offset = 0; offset < PANEL_CALLBACK_SLOTS_END; offset += 8) bind(PANEL_ENTER, offset, 0);
+    bind(PANEL_ENTER, PANEL_PRESS, enter_press);
     bind(PANEL_ENTER, PANEL_SHORT_RELEASE, enter_release);
-    bind(PANEL_ENTER, PANEL_HOLD, clear_hold);
+    bind(PANEL_ENTER, PANEL_HOLD, enter_held);
+    bind(PANEL_ENTER, PANEL_ACCEPTED_RELEASE, clear_hold);
+    *(volatile u16 *)(FRONT_PANEL_STATE + PANEL_ENTER*FRONT_PANEL_RECORD_SIZE + PANEL_HOLD_TICKS) = PANEL_SELECTOR_HOLD_TICKS;
+    turned = 0;
     REG32(CDISPLAY_TASK_OBJECT + UI_PAGE_RENDER_PREVIOUS_PAGE) = ~0u;
     revision++;
 }
@@ -321,7 +372,7 @@ static void set_position(struct eq_value *v, u32 f, float x)
         u32 m = f/2;
         if (f%2) v->amount[m] = (signed char)((s32)(x*2*EQ_CV_AMOUNT_MAX+0.5f)-EQ_CV_AMOUNT_MAX);
         else v->source[m] = (signed char)((s32)(x*(EQ_CV_SOURCE_MAX-EQ_CV_SOURCE_OFF)+0.5f)+EQ_CV_SOURCE_OFF);
-    } else if (f <= FIELD_HIGH_FREQUENCY) v->frequency[f] = eq_frequency(x);
+    } else if (f <= FIELD_HIGH_FREQUENCY) v->frequency[f] = (u16)(x*EQ_STEP_MAX+0.5f);
     else if (f <= FIELD_HIGH_GAIN) {
         s32 limit = eq_gain_limit(v, f-FIELD_LOW_GAIN);
         v->gain[f-FIELD_LOW_GAIN] = (signed short)((s32)(x*2*limit+0.5f)-limit);
@@ -335,15 +386,18 @@ static void step(struct eq_value *v, u32 f, s32 delta)
 {
     if (page == PAGE_CV) {
         u32 m = f/2;
-        if (f%2) v->amount[m] = (signed char)clamp(v->amount[m]+delta, -EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX);
+        if (f%2) v->amount[m] = (signed char)clamp(panel_step(v->amount[m], delta, AMOUNT_COARSE, 0), -EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX);
         else v->source[m] = (signed char)clamp(v->source[m]+delta, EQ_CV_SOURCE_OFF, EQ_CV_SOURCE_MAX);
-    } else if (f <= FIELD_HIGH_FREQUENCY) v->frequency[f] = eq_frequency_step(v->frequency[f], delta);
+    } else if (f <= FIELD_HIGH_FREQUENCY)
+        v->frequency[f] = (u16)clamp(panel_step(v->frequency[f], delta, FREQUENCY_COARSE, EQ_STEP_1K), 0, EQ_STEP_MAX);
     else if (f <= FIELD_HIGH_GAIN) {
         s32 limit = eq_gain_limit(v, f-FIELD_LOW_GAIN);
-        v->gain[f-FIELD_LOW_GAIN] = (signed short)clamp(v->gain[f-FIELD_LOW_GAIN]+delta, -limit, limit);
-    } else if (f <= FIELD_HIGH_Q) v->q[f-FIELD_LOW_Q] = (u8)clamp(v->q[f-FIELD_LOW_Q]+delta, EQ_Q_OWN, EQ_Q_STEPS);
+        v->gain[f-FIELD_LOW_GAIN] = (signed short)clamp(panel_step(v->gain[f-FIELD_LOW_GAIN], delta, GAIN_COARSE, 0), -limit, limit);
+    } else if (f <= FIELD_HIGH_Q)
+        v->q[f-FIELD_LOW_Q] = (u8)clamp(panel_step(v->q[f-FIELD_LOW_Q], delta, EQ_Q_STEPS_PER_OCTAVE, 1), EQ_Q_OWN, EQ_Q_STEPS);
     else if (f == FIELD_HPF) {
-        s32 hpf = clamp((v->hpf ? v->hpf-(s32)EQ_HPF_MIN+1 : 0)+delta, 0, EQ_HPF_MAX-EQ_HPF_MIN+1);
+        /* Off, then 20 Hz at 1; push-turn lands on whole tens of hertz. */
+        s32 hpf = clamp(panel_step(v->hpf ? v->hpf-(s32)EQ_HPF_MIN+1 : 0, delta, HPF_COARSE, 1), 0, EQ_HPF_MAX-EQ_HPF_MIN+1);
         v->hpf = (u16)(hpf ? hpf+EQ_HPF_MIN-1 : 0);
     } else if (delta) v->on = delta > 0;
 }
@@ -352,6 +406,7 @@ void eq_panel_select(u32 *context, s32 delta)
     (void)context;
     const struct panel_page *shown = extra();
     if (page >= PAGE_EXTRA && !shown) return;
+    if (panel_coarse()) turned = 1;
     if (shown && value_edit) shown->step(channel(), field, delta);
     else if (value_edit && !(page == PAGE_EQ && field == FIELD_SCOPE)) {
         struct eq_value next = *value();
@@ -403,11 +458,32 @@ static void pixel(s32 x, s32 y, u16 color)
 {
     ((volatile u16 *)OLED_SHADOW_FRAMEBUFFER_BASE)[y*OLED_SIDE+x] = color;
 }
-static void format_frequency(char *out, u32 f, u32 unit)
+#define STEP_TENTHS_BELOW 20000u   /* centihertz: 200 Hz */
+#define STEP_KHZ_FROM 100000u      /* 1 kHz */
+#define STEP_KHZ_HUNDREDTHS_FROM 1000000u
+#define CENTIHERTZ_PER_TENTH 10u
+#define CENTIHERTZ_PER_HZ 100u
+#define CENTIHERTZ_PER_KHZ_HUNDREDTH 1000u
+u32 eq_step_text(char *out, u32 step)
 {
-    if (f < 1000) sprintf(out, unit ? "%d Hz" : "%d", f);
-    else if (f < 10000) sprintf(out, unit ? "%d.%02dk" : "%d.%02d", f/1000, (f%1000+5)/10 > 99 ? 99 : (f%1000+5)/10);
-    else sprintf(out, unit ? "%d.%dk" : "%d.%d", f/1000, (f%1000+50)/100 > 9 ? 9 : (f%1000+50)/100);
+    u32 c = eq_step_centihertz(step);
+    if (c < STEP_TENTHS_BELOW) {
+        u32 tenths = (c + CENTIHERTZ_PER_TENTH/2)/CENTIHERTZ_PER_TENTH;
+        sprintf(out, "%d.%d", tenths/10, tenths%10);
+        return 0;
+    }
+    u32 hz = (c + CENTIHERTZ_PER_HZ/2)/CENTIHERTZ_PER_HZ;
+    if (c < STEP_KHZ_FROM) sprintf(out, "%d", hz);
+    else if (c < STEP_KHZ_HUNDREDTHS_FROM) sprintf(out, "%d.%03d", hz/1000, hz%1000);
+    else { u32 h = (c + CENTIHERTZ_PER_KHZ_HUNDREDTH/2)/CENTIHERTZ_PER_KHZ_HUNDREDTH; sprintf(out, "%d.%02d", h/100, h%100); }
+    return c >= STEP_KHZ_FROM;
+}
+/* A band's frequency with its unit: 150.4 Hz, 1.000k. */
+static void format_frequency(char *out, u32 step)
+{
+    char number[12];
+    u32 khz = eq_step_text(number, step);
+    sprintf(out, khz ? "%sk" : "%s Hz", number);
 }
 static void format_signed(char *out, s32 x, u32 decimals)
 {
@@ -415,10 +491,7 @@ static void format_signed(char *out, s32 x, u32 decimals)
     if (decimals == 1) sprintf(out, "%c%d.%d", x < 0 ? '-' : '+', magnitude/10, magnitude%10);
     else sprintf(out, "%c%d.%02d", x < 0 ? '-' : '+', magnitude/100, magnitude%100);
 }
-static s32 graph_x(u32 frequency)
-{
-    return GRAPH_LEFT+1+(s32)(eq_frequency_position((u16)frequency)*(CURVE_POINTS-1)+0.5f);
-}
+static s32 graph_x(float position) { return GRAPH_LEFT+1+(s32)(position*(CURVE_POINTS-1)+0.5f); }
 static void draw_graph(const struct eq_value *live)
 {
     s32 top = GRAPH_TOP+1, bottom = GRAPH_TOP+GRAPH_HEIGHT-2, middle = (top+bottom)/2;
@@ -428,7 +501,7 @@ static void draw_graph(const struct eq_value *live)
     for (s32 x = GRAPH_LEFT+1; x < GRAPH_LEFT+GRAPH_WIDTH-1; x += 2) pixel(x, middle, COLOR_DARK_GRAY);
     static const u16 decades[] = {100, 1000, 10000};
     for (u32 d = 0; d < 3; ++d)
-        for (s32 y = top; y <= bottom; y += 2) pixel(graph_x(decades[d]), y, COLOR_DARK_GRAY);
+        for (s32 y = top; y <= bottom; y += 2) pixel(graph_x(eq_frequency_position(decades[d])), y, COLOR_DARK_GRAY);
     struct eq_value shape = *live;
     shape.on = 1; /* EQ Out still shows its settings, grayed */
     eq_curve(&shape, CURVE_POINTS, curve, top, bottom);
@@ -442,7 +515,7 @@ static void draw_graph(const struct eq_value *live)
     s32 selected_band = page == PAGE_EQ && field <= FIELD_HIGH_Q ? (s32)(field%3)
         : page == PAGE_CV && field/2 < EQ_MOD_HPF ? (s32)(field/4) : -1;
     for (u32 band = 0; band < 3; ++band) {
-        s32 x = graph_x(live->frequency[band]), y = curve[x-GRAPH_LEFT-1];
+        s32 x = graph_x(eq_step_position(live->frequency[band])), y = curve[x-GRAPH_LEFT-1];
         x = clamp(x-1, GRAPH_LEFT+1, GRAPH_LEFT+GRAPH_WIDTH-1-MARKER_SIZE);
         y = clamp(y-1, top, bottom+1-MARKER_SIZE);
         oled_shadow_fill_rect((u32)x, (u32)y, MARKER_SIZE, MARKER_SIZE,
@@ -467,7 +540,7 @@ static void draw_eq_page(u32 *task, const struct eq_value *v)
     for (u32 band = 0; band < 3; ++band) {
         s32 x = LEFT_X+(s32)band*COLUMN_WIDTH;
         heading(x, BAND_HEADING_Y, bands[band]);
-        format_frequency(line, v->frequency[band], 1);
+        format_frequency(line, v->frequency[band]);
         value_text(x, FREQUENCY_Y, line, field == FIELD_LOW_FREQUENCY+band);
         format_signed(line, v->gain[band], 1);
         value_text(x, GAIN_Y, line, field == FIELD_LOW_GAIN+band);
@@ -557,9 +630,7 @@ static void draw_popup(const struct eq_value *v)
     s32 y = field < FIELD_HPF ? BAND_POPUP_Y : SETTINGS_POPUP_Y;
     sprintf(title, "%s", field_titles[field]);
     if (field <= FIELD_HIGH_FREQUENCY) {
-        u32 f = v->frequency[field];
-        format_frequency(value_line, f, 0);
-        sprintf(suffix, f < 1000 ? " Hz" : " kHz");
+        sprintf(suffix, eq_step_text(value_line, v->frequency[field]) ? " kHz" : " Hz");
     } else if (field <= FIELD_HIGH_GAIN) {
         format_signed(value_line, v->gain[field-FIELD_LOW_GAIN], 1);
         sprintf(suffix, " dB");

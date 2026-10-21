@@ -16,8 +16,9 @@
  * sounding, a new one takes the one nearest its end and the next nearest
  * fades out ahead of the grain after.
  *
- * The settings are a preset's and live in the overlay (patch_grain). Eight
- * of the fields have a CV route; the foreground adds each route's CV to its
+ * Each channel has its own settings, stored in the preset (patch_grains, in
+ * the overlay). The engine uses the playing channel's. Eight of the fields
+ * have a CV route; the foreground adds each route's CV to its
  * field and derives the per-frame values from the result, and builds the
  * table of sample ranges. The audio IRQ owns the grains. The foreground
  * cannot interrupt the IRQ, so a table is published by flipping one index
@@ -264,22 +265,29 @@ static s32 scaled(s32 value, s32 cents)
     return (s32)(octaves < 0 ? wide >> -octaves : wide << octaves);
 }
 
-/* The fields with their routes' CV added; derive again when one moved. */
-static void modulate(void)
+/* A channel's fields with its CV routes applied. */
+static void fields(u32 channel, s32 *next)
 {
-    const struct grain_settings *g = &patch_grain;
-    s32 next[GRAIN_FIELDS];
+    const struct grain_settings *g = &patch_grains[channel];
     for (u32 f = 0; f < GRAIN_FIELDS; ++f) next[f] = g->value[f];
     for (u32 r = 0; r < GRAIN_ROUTES; ++r) {
         u32 f = grain_routes[r].field;
         s32 low = grain_ranges[f].low, high = grain_ranges[f].high;
-        s64 turn = (s64)eq_cv_counts(g->source[r], grain_channel & (PRESET_CHANNELS - 1u)) * g->amount[r] * ROUTE_VOLTS;
+        s64 turn = (s64)eq_cv_counts(g->source[r], channel) * g->amount[r] * ROUTE_VOLTS;
         if (!turn) continue;
         if (!grain_routes[r].span) next[f] = scaled(next[f], (s32)(turn * ROUTE_CENTS_PER_VOLT / ROUTE_COUNT_SCALE));
         else next[f] += (s32)(turn * grain_routes[r].span / (ROUTE_COUNT_SCALE * ROUTE_VOLTS));
         if (f == GRAIN_SLIDE) next[f] %= SLIDE_WHOLE;
         next[f] = next[f] < low ? low : next[f] > high ? high : next[f];
     }
+}
+
+/* Recompute the playing channel's fields; rederive when any changed. */
+static void modulate(void)
+{
+    if (grain_channel == GRAIN_OFF) return;
+    s32 next[GRAIN_FIELDS];
+    fields(grain_channel, next);
     if (!memcmp(next, values, sizeof(values))) return;
     memcpy(values, next, sizeof(values));
     derive();
@@ -548,6 +556,7 @@ static void start(u32 channel)
     countdown = 0; drift = 0; seed = RANDOM_SEED;
     ranges_build(&tables[0], channel);
     live = 0;
+    fields(channel, values);
     derive();
     norm = (s32)tuning.norm;
     MEMORY_BARRIER();
@@ -557,12 +566,18 @@ static void start(u32 channel)
 
 static s32 clamp(s32 value, s32 low, s32 high) { return value < low ? low : value > high ? high : value; }
 
-/* One setting, clamped to its range: a field, or past GRAIN_REQUEST_ROUTE a
- * route's source or amount. Grain On picks the channel, taking it from any
- * other; the rest belong to the one engine. */
+/* Set each channel's Grain On: 1 for the playing channel, 0 for the rest. */
+static void mark_playing(void)
+{
+    for (u32 ch = 0; ch < PRESET_CHANNELS; ++ch) patch_grains[ch].value[GRAIN_ON] = grain_channel == ch;
+}
+
+/* Store one of a channel's settings, clamped to its range. field is a grain
+ * field, or past GRAIN_REQUEST_ROUTE a route's source or amount. Grain On
+ * makes this the playing channel and turns it off for the others. */
 static u32 store(u32 channel, u32 field, s32 value)
 {
-    struct grain_settings *g = &patch_grain;
+    struct grain_settings *g = &patch_grains[channel];
     if (field >= GRAIN_REQUEST_ROUTE) {
         u32 route = (field - GRAIN_REQUEST_ROUTE) / 2;
         if (route >= GRAIN_ROUTES) return BAD_RANGE;
@@ -572,18 +587,18 @@ static u32 store(u32 channel, u32 field, s32 value)
         if (value && channel_record(channel)[CHANNEL_MODE] == CHANNEL_MODE_STEREO_RIGHT) return BAD_STATE;
         if (value) start(channel);
         else if (grain_channel == channel) stop();
-        g->value[GRAIN_ON] = grain_channel == GRAIN_OFF ? 0 : (s16)(grain_channel + 1);
+        mark_playing();
     } else g->value[field] = (s16)clamp(value, grain_ranges[field].low, grain_ranges[field].high);
     modulate();
     ++revision;
     return OK;
 }
 
-/* A setting as it is stored: a field, or past GRAIN_REQUEST_ROUTE a route's
- * source or amount. Grain is On for the channel that plays grains. */
+/* A channel's stored setting: a field, or past GRAIN_REQUEST_ROUTE a route's
+ * source or amount. Grain On is 1 only for the playing channel. */
 s32 grain_value(u32 channel, u32 field)
 {
-    const struct grain_settings *g = &patch_grain;
+    const struct grain_settings *g = &patch_grains[channel];
     if (field >= GRAIN_REQUEST_ROUTE) {
         u32 route = (field - GRAIN_REQUEST_ROUTE) / 2;
         return field & 1u ? g->amount[route] : g->source[route];
@@ -593,19 +608,30 @@ s32 grain_value(u32 channel, u32 field)
 s32 grain_low(u32 field) { return field == GRAIN_ON ? 0 : grain_ranges[field].low; }
 s32 grain_high(u32 field) { return field == GRAIN_ON ? 1 : grain_ranges[field].high; }
 u32 grain_revision(void) { return revision; }
-/* What a remote editor mirrors: the channel, the fields and the routes. */
-u32 grain_crc(void) { return ~crc32_update(~0u, &patch_grain, sizeof(patch_grain)); }
+/* Checksum of every channel's fields and routes, for remote editors. */
+u32 grain_crc(void) { return ~crc32_update(~0u, patch_grains, sizeof(patch_grains)); }
 
-/* A preset's settings replaced ours: play its channel, if it can. */
+/* A preset load replaced the settings. Start the first channel marked as
+ * playing, unless it is a Stereo/Right channel. */
 static void adopt(void)
 {
     loaded = patch_grain_loaded;
-    u32 channel = (u32)patch_grain.value[GRAIN_ON] - 1u;
     stop();
-    modulate(); /* the fields first: starting derives from them */
-    if (channel < PRESET_CHANNELS && channel_record(channel)[CHANNEL_MODE] != CHANNEL_MODE_STEREO_RIGHT) start(channel);
-    else patch_grain.value[GRAIN_ON] = 0;
+    for (u32 ch = 0; ch < PRESET_CHANNELS; ++ch)
+        if (patch_grains[ch].value[GRAIN_ON]) {
+            if (channel_record(ch)[CHANNEL_MODE] != CHANNEL_MODE_STEREO_RIGHT) start(ch);
+            break;
+        }
+    mark_playing();
     ++revision;
+}
+
+/* The value a panel edit builds on: the one still waiting for the
+ * foreground when there is one, so clicks between two passes add up. */
+s32 grain_target(u32 channel, u32 field)
+{
+    if (request.waiting && request.channel == channel && request.field == field) return request.value;
+    return grain_value(channel, field);
 }
 
 void grain_request(u32 channel, u32 field, s32 value)
@@ -646,20 +672,21 @@ void grains_foreground(void)
  *   u32 grains started, skipped (the voice not playing, or the grain
  *   longer than its zone) and stolen (grains cut short to make room);
  *   s32 pitch step, u32 playhead frame, u32 the zone's first frame and
- *   frames; then the fields as s16, Size first and Skew last.
+ *   frames; then the asking channel's fields as s16, Size first and Skew last.
  * GRAIN_SET_VIEW replies what is sounding, for a display: u8 channel (FFh off),
  * u8 the voice's zone, u16 zero, u32 playhead frame, then each grain as a
  * u32: its sample frame, window level in eighths from bit 27, bit 30
  * backwards, bit 31 sounding.
  * GRAIN_SET_ROUTE and the fifteen after it set a route's source, then its
- * amount; GRAIN_SET_ROUTES replies every route's source and amount as s8.
+ * amount; GRAIN_SET_ROUTES replies the channel's routes, source and amount as s8.
  * GRAIN_SET_SKEW sets Skew. */
 u32 grain_set(u32 channel, u32 field, s32 value, u8 *out, u32 *count)
 {
     if (channel >= PRESET_CHANNELS || field > GRAIN_SET_SKEW ||
         (field > GRAIN_SET_VIEW && field < GRAIN_SET_SLIDE)) return BAD_RANGE;
     if (field == GRAIN_SET_ROUTES) {
-        for (u32 r = 0; r < GRAIN_ROUTES; ++r) { out[2*r] = (u8)patch_grain.source[r]; out[2*r + 1] = (u8)patch_grain.amount[r]; }
+        const struct grain_settings *g = &patch_grains[channel];
+        for (u32 r = 0; r < GRAIN_ROUTES; ++r) { out[2*r] = (u8)g->source[r]; out[2*r + 1] = (u8)g->amount[r]; }
         *count = 2 * GRAIN_ROUTES;
         return OK;
     }
@@ -698,7 +725,7 @@ u32 grain_set(u32 channel, u32 field, s32 value, u8 *out, u32 *count)
         put_u32(out + 16, (u32)patch_grain_steps[at]);
         put_u32(out + 20, REG32(PLAYHEAD_FRAME_BASE + at * PLAYHEAD_FRAME_STRIDE));
         put_u32(out + 24, on ? t->zone[zone].first : 0); put_u32(out + 28, on ? t->zone[zone].frames : 0);
-        for (u32 n = GRAIN_SIZE; n < GRAIN_FIELDS; ++n) put_u16(out + 32 + (n - GRAIN_SIZE) * 2, (u32)patch_grain.value[n]);
+        for (u32 n = GRAIN_SIZE; n < GRAIN_FIELDS; ++n) put_u16(out + 32 + (n - GRAIN_SIZE) * 2, (u32)patch_grains[channel].value[n]);
         *count = 32 + (GRAIN_FIELDS - GRAIN_SIZE) * 2;
         return OK;
     }

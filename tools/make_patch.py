@@ -20,6 +20,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eq_coefficients
 from patcher import BRANCH_OFFSET_BITS, BRANCH_OPCODES, BRANCH_PIPELINE_BYTES, WORD_BYTES, decode_patch, number
 
+# The release this tree builds: MAJOR.MINOR.PATCH, with -dev between releases.
+VERSION_FILE = ROOT / "VERSION"
+VERSION_PATTERN = r"(\d+)\.(\d+)\.(\d+)(-dev)?"
+
+
+def version() -> tuple[int, int, int, bool]:
+    """(major, minor, patch, development build) from VERSION."""
+    match = re.fullmatch(VERSION_PATTERN, VERSION_FILE.read_text().strip())
+    if not match or any(int(part) > 255 for part in match.groups()[:3]):
+        raise ValueError("VERSION must be MAJOR.MINOR.PATCH, each 0-255, optionally ending -dev")
+    return int(match[1]), int(match[2]), int(match[3]), bool(match[4])
+
+
+def version_flags() -> list[str]:
+    major, minor, patch, dev = version()
+    return [f"-DPATCH_VERSION_MAJOR={major}", f"-DPATCH_VERSION_MINOR={minor}",
+            f"-DPATCH_VERSION_PATCH={patch}", f"-DPATCH_VERSION_DEV={int(dev)}"]
+
+
 # Sources that use the VFP in the foreground; everything else must leave it alone.
 FLOAT_SOURCES = ("eq_math", "eq_model", "eq_panel")
 SPLICE_INSERT_SECTION = ".splice.{name}"
@@ -54,7 +73,7 @@ def compile_source(prefix: str, source: Path, build: Path, include: Path) -> str
     subprocess.run([prefix + "gcc", "-c", "-std=c11", "-Os", "-g",
                     "-mcpu=cortex-a8", "-marm", *fp_flags,
                     "-ffreestanding", "-fno-builtin", "-fno-common", "-fno-unwind-tables",
-                    "-fno-asynchronous-unwind-tables", "-Wall", "-Wextra", "-Werror",
+                    "-fno-asynchronous-unwind-tables", "-Wall", "-Wextra", "-Werror", *version_flags(),
                     f"-I{include}", str(source), "-o", str(obj)], check=True)
     return str(obj)
 

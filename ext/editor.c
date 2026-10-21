@@ -92,7 +92,8 @@ enum {
 enum {
     SET_FILTER_TYPE, SET_FILTER_CUTOFF, SET_FILTER_RESONANCE, SET_FILTER_EXTRA, SET_FILTER_OVERRIDE,
     SET_FILTER_SOURCE, SET_FILTER_AMOUNT = SET_FILTER_SOURCE + FILTER_MOD_COUNT,
-    SET_FILTER_IDS = SET_FILTER_AMOUNT + FILTER_MOD_COUNT
+    SET_FILTER_RIGHT = SET_FILTER_AMOUNT + FILTER_MOD_COUNT, /* the Stereo/Right side's cutoff, steps from this one's */
+    SET_FILTER_IDS
 };
 /* Grain mode fields (grains.c); the zone byte is unused. Resampling
  * (resample.c) follows them. */
@@ -213,6 +214,7 @@ void filter_record(u32 index, u8 *out)
     put_u16(out + 1, v->cutoff);
     out[3] = v->resonance; out[4] = v->extra; out[5] = v->override;
     for (u32 m = 0; m < FILTER_MOD_COUNT; ++m) { out[6 + m] = (u8)v->source[m]; out[6 + FILTER_MOD_COUNT + m] = (u8)v->amount[m]; }
+    put_u16(out + 6 + 2 * FILTER_MOD_COUNT, (u32)(u16)v->right);
 }
 
 /* One EQ field, clamped to the panel's ranges; the stored value is returned.
@@ -228,7 +230,7 @@ static u32 set_eq(u32 channel, u32 slot, u32 id, s32 value, s32 *stored)
         next.hpf = (u16)(value <= 0 ? 0 : clamp(value, EQ_HPF_MIN, EQ_HPF_MAX));
         *stored = next.hpf;
     } else if (id < SET_EQ_GAIN) {
-        next.frequency[id - SET_EQ_FREQUENCY] = (u16)clamp(value, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+        next.frequency[id - SET_EQ_FREQUENCY] = (u16)clamp(value, 0, EQ_STEP_MAX);
         *stored = next.frequency[id - SET_EQ_FREQUENCY];
     } else if (id < SET_EQ_ON) {
         s32 limit = eq_gain_limit(&next, id - SET_EQ_GAIN);
@@ -260,7 +262,7 @@ static u32 set_filter(u32 channel, u32 slot, u32 id, s32 value, s32 *stored)
     if (slot != EQ_SLOT_CHANNEL && !next.override) next = filter_channels[channel];
     next.override = slot != EQ_SLOT_CHANNEL;
     if (id == SET_FILTER_TYPE) *stored = next.type = (u8)clamp(value, FILTER_OFF, FILTER_TYPES - 1);
-    else if (id == SET_FILTER_CUTOFF) *stored = next.cutoff = (u16)clamp(value, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+    else if (id == SET_FILTER_CUTOFF) *stored = next.cutoff = (u16)clamp(value, 0, EQ_STEP_MAX);
     else if (id == SET_FILTER_RESONANCE) *stored = next.resonance = (u8)clamp(value, 0, FILTER_RESONANCE_MAX);
     else if (id == SET_FILTER_EXTRA) *stored = next.extra = (u8)clamp(value, 0, FILTER_EXTRA_MAX);
     else if (id == SET_FILTER_OVERRIDE) {
@@ -269,7 +271,8 @@ static u32 set_filter(u32 channel, u32 slot, u32 id, s32 value, s32 *stored)
         *stored = next.override;
     }
     else if (id < SET_FILTER_AMOUNT) *stored = next.source[id - SET_FILTER_SOURCE] = (signed char)clamp(value, EQ_CV_SOURCE_OFF, EQ_CV_SOURCE_MAX);
-    else *stored = next.amount[id - SET_FILTER_AMOUNT] = (signed char)clamp(value, -EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX);
+    else if (id < SET_FILTER_RIGHT) *stored = next.amount[id - SET_FILTER_AMOUNT] = (signed char)clamp(value, -EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX);
+    else *stored = next.right = (s16)clamp(value, -(s32)EQ_STEP_MAX, EQ_STEP_MAX);
     if (slot == EQ_SLOT_CHANNEL) filter_channels[channel] = next;
     else filter_zones[channel][slot] = next;
     return OK;
@@ -385,13 +388,14 @@ static void automate_store(u32 channel, u32 zone, u32 id, u32 above)
     }
     if (id >= SET_FILTER_FIRST) {
         static const s32 low[SET_FILTER_SOURCE] = {
-            FILTER_OFF, EQ_FREQUENCY_MIN, 0, 0, 0
+            FILTER_OFF, 0, 0, 0, 0                /* the cutoff from step 0 */
         };
         s32 stored;
         u32 field = id - SET_FILTER_FIRST;
         if (field >= SET_FILTER_IDS || field == SET_FILTER_OVERRIDE) return;
         (void)set_filter(channel, EQ_SLOT_CHANNEL, field,
-                         (field < SET_FILTER_SOURCE ? low[field] : field < SET_FILTER_AMOUNT ? EQ_CV_SOURCE_OFF : -EQ_CV_AMOUNT_MAX) + (s32)above,
+                         (field < SET_FILTER_SOURCE ? low[field] : field < SET_FILTER_AMOUNT ? EQ_CV_SOURCE_OFF :
+                          field < SET_FILTER_RIGHT ? -EQ_CV_AMOUNT_MAX : -(s32)EQ_STEP_MAX) + (s32)above,
                          &stored);
         return;
     }

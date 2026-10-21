@@ -25,9 +25,9 @@ void eq_default(struct eq_value *value)
 {
     memset(value, 0, sizeof(*value));
     value->on = 1;
-    value->frequency[0] = 150;
-    value->frequency[1] = 1000;
-    value->frequency[2] = 10000;
+    value->frequency[0] = EQ_STEP_150HZ;
+    value->frequency[1] = EQ_STEP_1K;
+    value->frequency[2] = EQ_STEP_10K;
     for (u32 m = 0; m < EQ_MOD_COUNT; ++m) {
         value->source[m] = EQ_CV_SOURCE_OFF;
         value->amount[m] = EQ_CV_AMOUNT_MAX;
@@ -66,8 +66,10 @@ void eq_modulate(const struct eq_value *value, u32 channel, struct eq_value *out
             s32 gain = value->gain[band] + (s32)(amount*EQ_CV_GAIN_TENTHS_PER_VOLT + (amount < 0 ? -0.5f : 0.5f));
             s32 limit = eq_gain_limit(value, band);
             out->gain[band] = (signed short)(gain < -limit ? -limit : gain > limit ? limit : gain);
-        } else
-            out->frequency[band] = eq_frequency_shift(value->frequency[band], amount, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+        } else {
+            s32 step = value->frequency[band] + (s32)(amount*EQ_STEPS_PER_OCTAVE + (amount < 0 ? -0.5f : 0.5f));
+            out->frequency[band] = (u16)(step < 0 ? 0 : step > EQ_STEP_MAX ? EQ_STEP_MAX : step);
+        }
     }
 }
 void eq_automate(const u8 *p, u32 bytes)
@@ -76,8 +78,7 @@ void eq_automate(const u8 *p, u32 bytes)
     u32 field = p[1], value = (p[2] & 15u) | (p[3] & 15u) << 4 | (p[4] & 15u) << 8 | (p[5] & 15u) << 12;
     struct eq_value next = eq_channels[p[0]];
     if (field < EQ_AUTOMATE_GAIN)
-        next.frequency[field] = eq_frequency_shift(EQ_FREQUENCY_MIN, value*(1.0f/EQ_CENTS_PER_OCTAVE),
-                                                   EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+        next.frequency[field] = (u16)eq_step_above_min(value);
     else if (field < EQ_AUTOMATE_Q) {
         if (value > 2*EQ_GAIN_MAX/EQ_TENTHS_PER_DB) value = 2*EQ_GAIN_MAX/EQ_TENTHS_PER_DB;
         next.gain[field - EQ_AUTOMATE_GAIN] = (signed short)((s32)value*EQ_TENTHS_PER_DB - EQ_GAIN_MAX);
@@ -169,7 +170,7 @@ void filter_default(struct filter_value *value, u32 channel)
 {
     (void)channel;
     memset(value, 0, sizeof(*value));
-    value->cutoff = 1000;
+    value->cutoff = EQ_STEP_1K;
     value->extra = 50;
     for (u32 m = 0; m < FILTER_MOD_COUNT; ++m) {
         value->source[m] = EQ_CV_SOURCE_OFF;
@@ -233,7 +234,7 @@ void filter_live(const struct filter_value *value, u32 channel, struct filter_va
     if (!routed(value, FILTER_MOD_CUTOFF)) return;
     float octaves = value->amount[FILTER_MOD_CUTOFF]*(1.0f/EQ_CV_AMOUNT_MAX)*FILTER_CUTOFF_OCTAVES_PER_VOLT*
         volts(value->source[FILTER_MOD_CUTOFF], channel);
-    out->cutoff = eq_frequency_shift(value->cutoff, octaves, EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+    out->cutoff = (u16)clamped(value->cutoff + steps(octaves, EQ_STEPS_PER_OCTAVE), 0, EQ_STEP_MAX);
 }
 /* channel's inputs are the ones its cutoff CV reads (a Stereo/Right lane's
  * are its master's). */
@@ -269,9 +270,14 @@ void filter_foreground_poll(void)
         u32 master = ch;
         if (ch && BYTE(EQ_CHANNEL_RECORDS + ch*EQ_CHANNEL_BYTES + EQ_CHANNEL_MODE) == EQ_CHANNEL_MODE_STEREO_RIGHT) master--;
         if (master != ch) {
+            /* The master's settings, with the cutoff moved by the master's
+             * right-side offset. Cutoff CV then moves both lanes. */
+            struct filter_value right = filter_rendered[master];
+            right.cutoff = (u16)filter_right_cutoff(&right);
+            right.right = 0;
             memset(&filter_base_used[ch], ~0, sizeof(filter_base_used[ch]));
-            if (rebuild || memcmp(&filter_rendered[ch], &filter_rendered[master], sizeof(filter_rendered[ch]))) {
-                filter_rendered[ch] = filter_rendered[master];
+            if (rebuild || memcmp(&filter_rendered[ch], &right, sizeof(right))) {
+                filter_rendered[ch] = right;
                 changed = 1;
                 filter_store(bank, ch, master, &filter_rendered[ch]);
             }

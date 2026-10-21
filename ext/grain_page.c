@@ -2,9 +2,8 @@
 
 /* The module's Grain and Grain CV pages, which Phase Mod steps to from its
  * own page (src/eq_panel.c owns the cursor, the edit state and the screen).
- * ENTER opens the stock edit popup. Grain shows On for the channel that
- * plays grains; the other settings belong to the one engine, whichever
- * channel is selected. Sample on either page resamples the selected channel
+ * ENTER opens the stock edit popup. The page shows the selected channel's
+ * settings; Grain is On only for the playing channel. Sample on either page resamples the selected channel
  * (resample.c). */
 
 int sprintf(char *buffer, const char *format, ...);
@@ -17,11 +16,15 @@ int sprintf(char *buffer, const char *format, ...);
 #define TEXT_BYTES             24u
 #define SIZE_OCTAVES_Q16       784190u  /* log2(20000 / 5): DATA 2 sweeps Size by ratio */
 #define CENTS_PER_OCTAVE       1200u
-#define STEP_RATIO_SHIFT       5u       /* Size, Spray and Detune step by 1/32 of their value */
-#define STEP_COARSE            5        /* Overlap, Scan, Slide and Skew */
 #define TENTHS                 10
 #define HUNDREDTHS             100
 #define ROUTE_VOLTS            5        /* a route's span is five volts at +1.00 */
+/* Coarse step sizes (panel_step): Size x2 or /2, Detune 100 cents, Overlap
+ * 25 (a quarter grain), other fields 10. On and CV sources step by 1. */
+#define DETUNE_COARSE          100
+#define OVERLAP_COARSE         25
+#define FIELD_COARSE           10
+#define AMOUNT_COARSE          10
 
 /* The Grain page: three rows of two cells, then two rows of three. */
 enum { WIDE = 2, NARROW = 3 };
@@ -87,15 +90,27 @@ static void draw(u32 channel, u32 cursor, u32 editing)
                             POPUP_BACKGROUND_FROM_STYLE, 0);
 }
 
+static s32 coarse(u32 field)
+{
+    switch (field) {
+    case GRAIN_ON: return 1;
+    case GRAIN_DETUNE: return DETUNE_COARSE;
+    case GRAIN_OVERLAP: return OVERLAP_COARSE;
+    default: return FIELD_COARSE;
+    }
+}
+
+/* Encoder step: one unit per click, as on stock pages (Size: 0.1 ms). */
 static void step(u32 channel, u32 cursor, s32 delta)
 {
     u32 field = cells[cursor].field;
-    s32 value = grain_value(channel, field), unit = 1;
+    s32 value = grain_target(channel, field);
     if (field == GRAIN_ON) { grain_request(channel, field, delta > 0); return; }
-    if (field == GRAIN_SIZE || field == GRAIN_SPRAY || field == GRAIN_DETUNE)
-        unit = value >> STEP_RATIO_SHIFT ? value >> STEP_RATIO_SHIFT : 1;
-    else if (field == GRAIN_OVERLAP || field == GRAIN_SCAN || field == GRAIN_SLIDE || field == GRAIN_SKEW) unit = STEP_COARSE;
-    grain_request(channel, field, value + delta * unit);
+    if (field == GRAIN_SIZE && panel_coarse()) {
+        for (; delta > 0 && value < grain_high(field); --delta) value *= 2;
+        for (; delta < 0 && value > grain_low(field); ++delta) value /= 2;
+    } else value = panel_step(value, delta, coarse(field), 0);
+    grain_request(channel, field, value < grain_low(field) ? grain_low(field) : value > grain_high(field) ? grain_high(field) : value);
 }
 
 static s32 linear(s32 low, s32 high, u32 q16) { return low + (s32)((q16 * (u32)(high - low) + 0x8000u) >> 16); }
@@ -134,7 +149,8 @@ static void draw_routes(u32 channel, u32 cursor, u32 editing)
 
 static void step_route(u32 channel, u32 cursor, s32 delta)
 {
-    grain_request(channel, GRAIN_REQUEST_ROUTE + cursor, grain_value(channel, GRAIN_REQUEST_ROUTE + cursor) + delta);
+    s32 value = grain_target(channel, GRAIN_REQUEST_ROUTE + cursor);
+    grain_request(channel, GRAIN_REQUEST_ROUTE + cursor, cursor & 1u ? panel_step(value, delta, AMOUNT_COARSE, 0) : value + delta);
 }
 
 static void position_route(u32 channel, u32 cursor, u32 q16)

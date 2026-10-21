@@ -4,7 +4,7 @@ PATCH := build/assimil8or.a8patch
 SOURCES := $(wildcard src/*.c src/*.h src/*.S src/*.ld ext/*.c ext/*.h) src/patch_layout.json
 .PHONY: all check release clean
 all: $(PATCH)
-$(PATCH): $(SOURCES) tools/make_patch.py tools/eq_coefficients.py patcher.py
+$(PATCH): $(SOURCES) VERSION tools/make_patch.py tools/eq_coefficients.py patcher.py
 	python3 tools/make_patch.py $@ --prefix '$(ARM_PREFIX)'
 # With A8_STOCK_APP set to Rossum's v3.04 download, the patch is applied to it as well.
 check: $(PATCH)

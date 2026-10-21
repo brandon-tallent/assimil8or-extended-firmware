@@ -1,13 +1,10 @@
 # Remote control protocol
 
-The Tallent Edition firmware answers System Exclusive messages on the
+The Tallent Edition firmware implements System Exclusive messages on the
 Assimil8or's MIDI connection (Rossum's Locutus expander). With them a
 computer or sequencer can read and edit the working preset, browse the card,
 audition and assign samples, drive the front panel, read the screen, record,
-and install software. This document is the whole wire contract, for anyone
-writing an editor.
-
-It describes protocol version 1, as Identify reports it.
+and install software.
 
 - [Messages](#messages)
 - [Example](#example)
@@ -36,7 +33,7 @@ F0 7D 41 38 01 <command> <sequence> <length> <packed payload> F7
 | Byte | Meaning |
 | --- | --- |
 | `7D` | The noncommercial manufacturer ID |
-| `41 38` | `A8`: tells these messages from other devices that use `7D` |
+| `41 38` | `A8`: identifies these messages among other devices that use `7D` |
 | `01` | Protocol version |
 | command | `01`–`3F` |
 | sequence | `00`–`7F`, chosen by the sender and echoed in the reply |
@@ -60,7 +57,7 @@ is described with each command. Integers are little-endian throughout. `u8`,
 | 1 | Unknown command, or the extension that serves it is not loaded |
 | 2 | Wrong payload length |
 | 3 | A value is out of range |
-| 4 | Busy: nothing was done; ask again |
+| 4 | Busy: nothing was done; send the request again |
 | 5 | Storage error |
 | 6 | CRC mismatch |
 | 7 | Invalid software image |
@@ -75,7 +72,7 @@ a reply.
 
 **Timing.** MIDI carries 3,125 bytes a second, so pace what you send to
 that. Send one request and wait for its reply before the next: the preset
-editing commands hold a single request at a time and answer Busy to a
+editing commands process one request at a time and reply Busy to a
 second. Most replies follow at once; those that touch the card are noted
 below and can take seconds.
 
@@ -135,8 +132,9 @@ inp.ignore_types(sysex=False)
 out.open_port(out.get_ports().index("M2")); inp.open_port(inp.get_ports().index("M2"))
 
 reply = request(out, inp, 0x01)                                          # Identify
-magic, protocol, build, crc, boot, failed, ext_crc, ext_state = struct.unpack("<8sI8sIIIIB", reply)
-print(magic.decode(), "protocol", protocol, "build", build.hex())
+magic, protocol, build, crc, boot, failed, ext_crc, ext_state = struct.unpack_from("<8sI8sIIIIB", reply)
+version = ".".join(map(str, reply[37:40])) if len(reply) >= 41 else "before 1.0.0"
+print(magic.decode(), "protocol", protocol, "build", build.hex(), "version", version)
 
 reply = request(out, inp, 0x33, struct.pack("<HB", 0, 12), sequence=2)   # Read model: offset 0, 12 bytes
 print("preset name:", reply.decode())
@@ -177,7 +175,8 @@ bits set, then `00 00` (offset 0) and `0C` (twelve bytes).
 | 03–06 | Peek, poke, stream | [Developer commands](#developer-commands) |
 
 Commands 32–3F are served by the extension image, the second file the
-patcher gives you. Without it they reply result 1, and Identify says so.
+patcher produces. Without it they reply result 1, and Identify reports
+the extension state.
 
 The commands under Developer are for working on the firmware itself. They
 are documented because they are there; they are not a stable interface.
@@ -196,8 +195,10 @@ are documented because they are there; they are not a stable interface.
 | u32 | Nonzero when the last trial failed and the module fell back |
 | u32 | CRC-32 of the loaded extension, 0 when none |
 | u8 | Extension state: 0 untried, 1 loaded, 2 missing, 3 invalid, 4 storage error |
+| u8, u8, u8 | Release: major, minor, patch (from version 1.0.0) |
+| u8 | Release flags: bit 0 set for a development build between releases |
 
-A module running Rossum's own software does not answer. Check the protocol
+Rossum's own software does not reply. Check the protocol
 version and that the extension is loaded before using commands 32–3F.
 
 **02 Diagnostics.** Empty payload, or one byte `01` to clear the renderer
@@ -431,7 +432,7 @@ Stereo/Right channels play their master's EQ.
 | ID | Parameter | Range |
 | ---: | --- | --- |
 | 96 | High-pass filter | 0 Off, 20…350 Hz |
-| 97, 98, 99 | Low, Mid, High frequency | 20…20,000 Hz |
+| 97, 98, 99 | Low, Mid, High frequency | Step 0…1196, as the filter's Cutoff below |
 | 100, 101, 102 | Low, Mid, High gain | 0.1 dB: ±180 for a bell, ±100 for a shelf |
 | 103 | EQ On | 0, 1 |
 | 104 | Zone has its own EQ | 0 follows the channel again, 1 own |
@@ -448,17 +449,19 @@ an amount of 100 a volt moves a frequency one octave or a gain 2 dB.
 
 The zone byte is a zone 0…7, or 8 for the channel's filter, and a zone
 follows its channel as for the EQ. Stereo/Right channels play their master's
-filter.
+filter, with the cutoff moved by the master's Right offset (141), so the
+right side follows the master's cutoff and its CV.
 
 | ID | Parameter | Range |
 | ---: | --- | --- |
 | 128 | Type | 0 Off, 1 LP 24, 2 LP 12, 3 BP 24, 4 BP 12, 5 HP 24, 6 HP 12, 7 Notch 24, 8 Notch 12, 9 Band Stop, 10 Dual L/BP |
-| 129 | Cutoff | 20…20,000 Hz |
+| 129 | Cutoff | Step 0…1196, 1/120 octave each: 1000 · 2^((step − 677) / 120) Hz, held at 20,000 Hz. Step 0 is 20.03 Hz, 677 is 1 kHz |
 | 130 | Resonance | 0…100: the damping k = 2(1 − r/100)^1.35, at least 0.05: Q 0.5 to 20 |
 | 131 | Extra | 0…100: see below |
 | 132 | Zone has its own filter | 0 follows the channel again, 1 own |
 | 133…136 | CV source for Cutoff, Resonance, Extra, Type | −4…23 |
 | 137…140 | CV amount for the same four | −100…100 |
+| 141 | Right: on a stereo pair, the Stereo/Right side's cutoff in steps from this one's | −1196…1196; the sum is held to 0…1196 |
 
 Extra is the type's own setting. Band Stop: how far above the cutoff its
 high-pass sits, 0.11 octave a step, so 0 is a notch at the cutoff. Dual
@@ -477,8 +480,10 @@ range; Resonance and Extra 20 steps; and Type two types, never to Off.
 
 ### Grain
 
-Grain mode belongs to one channel at a time, or to a Master and its
-Stereo/Right partner. The zone byte is unused.
+Each channel keeps its own grain settings and routes; the Set's channel
+byte selects the channel. Grain mode plays one channel at a time, or a Master and
+its Stereo/Right partner, with that channel's settings. The zone byte is
+unused.
 
 | ID | Parameter | Range |
 | ---: | --- | --- |
@@ -506,9 +511,9 @@ Three more IDs only read. Send them with any value.
 
 | ID | Reply in place of the stored value |
 | ---: | --- |
-| 170 | Engine state: u8 channel (`FF` off), u8 stereo pair, u8 grains sounding, u8 the voice's zone; u32 grains started, u32 skipped, u32 stolen (cut short to make room); s32 pitch step (frames per frame, Q25), u32 playhead frame, u32 the zone's first frame, u32 its frames; then parameters 161–169, 177 and 195 as s16 |
+| 170 | Engine state: u8 channel (`FF` off), u8 stereo pair, u8 grains sounding, u8 the voice's zone; u32 grains started, u32 skipped, u32 stolen (cut short to make room); s32 pitch step (frames per frame, Q25), u32 playhead frame, u32 the zone's first frame, u32 its frames; then the asking channel's parameters 161–169, 177 and 195 as s16 |
 | 171 | What is sounding, for a display: u8 channel (`FF` off), u8 zone, u16 zero, u32 the frame grains start at (`FFFFFFFF` while the voice is silent), then eight u32 grains: bits 0–26 the sample frame, 27–29 the window level in eighths, bit 30 backwards, bit 31 sounding |
-| 194 | The routes: eight pairs of s8 source, s8 amount |
+| 194 | The channel's routes: eight pairs of s8 source, s8 amount |
 
 ### Resample
 
@@ -541,18 +546,19 @@ beside it.
 | 3 | | Every zone's Sample info: 64 records of 14 bytes |
 | 4 | Nothing, or u16 first, u16 entries | The browsed folder's listing |
 | 5 | | The EQ: 72 records of 33 bytes |
-| 6 | | The filter: 72 records of 14 bytes |
+| 6 | | The filter: 72 records of 16 bytes |
 
 Each reply frame's data is u8 kind, u16 index (the byte offset, column,
 first entry or first record this frame starts at), then the data. A frame
 that fails carries its result and ends the stream.
 
-An EQ record: u16 HPF, 3 × u16 frequency, 3 × s16 gain, u8 On, u8 own EQ,
+An EQ record: u16 HPF, 3 × u16 frequency step, 3 × s16 gain, u8 On, u8 own EQ,
 7 × s8 CV source, 7 × s8 CV amount, 3 × u8 Q. The records run channel by
 channel: zones 1–8, then the channel's own.
 
-A filter record: u8 type, u16 cutoff, u8 resonance, u8 extra, u8 own filter,
-4 × s8 CV source, 4 × s8 CV amount; the records run as the EQ's.
+A filter record: u8 type, u16 cutoff step, u8 resonance, u8 extra, u8 own filter,
+4 × s8 CV source, 4 × s8 CV amount, s16 Right offset (141): 16 bytes; the
+records run as the EQ's.
 
 ## Automation
 
@@ -584,7 +590,7 @@ F0 7D 41 38 01 2D 00 06 00 <channel> <field> <n0> <n1> <n2> <n3> F7
 
 | Field | Value |
 | ---: | --- |
-| 0, 1, 2 | Low, Mid, High frequency, in cents above 20 Hz (0…11,959) |
+| 0, 1, 2 | Low, Mid, High frequency, in cents above 20 Hz (0…11,959), set to the nearest step |
 | 3, 4, 5 | Low, Mid, High gain, in dB above −18 (0…36) |
 | 6, 7, 8 | Low, Mid, High Q (0 own shape, 1…41) |
 | 9 | HPF in Hz (0 Off, 20…350) |
@@ -665,8 +671,8 @@ had. Notes stop sounding during an update.
 | 19 | Reboot | `SQA8` | Empty, then the module restarts |
 | 1A | Direct install | `SQA8` | Empty: replaces the software without a trial |
 
-Staging starts from the running image, so Block CRC tells you which
-4,096-byte blocks differ and only those need sending. After Commit, Reboot
+Staging starts from the running image, so Block CRC identifies the
+4,096-byte blocks that differ, and only those need sending. After Commit, Reboot
 starts the trial. Identify then reports boot mode 1 and the new build ID;
 promote it when it has run well, and Identify reports mode 0. An extension
 image for the running build is loaded as soon as it is committed, without
@@ -752,20 +758,20 @@ Fields without a type are one byte.
 
 A channel's zones in use are the leading ones with a name. The EQ and the
 grain settings are not in this model: read them with stream kind 5 and
-parameters 170 and 194. [PRESET_FORMAT.md](PRESET_FORMAT.md) describes how
-they are kept in the preset file.
+parameters 170 and 194. [PRESET_FORMAT.md](PRESET_FORMAT.md) lists their
+preset file lines.
 
 ## Notes for editor authors
 
 - **Start with Identify.** No reply means stock software or no MIDI
   expander. Check the protocol version and the extension state.
 - **Mirror, then follow.** Read the model with stream kind 0, the samples
-  with kind 3 and the EQ with kind 5, then poll Preset summary. Its
-  checksums tell you which part to read again, and they change for panel
+  with kind 3 and the EQ with kind 5, then poll Preset summary. A
+  changed checksum marks the part to read again, and they change for panel
   edits and preset changes as well as your own.
 - **Expect Busy.** Loading a folder or saving holds the card for seconds.
-  Busy means nothing was done; wait and ask again. Summary's flag bit 1
-  says the card is busy before you ask.
+  Busy means nothing was done; wait and send it again. Summary's flag bit 1
+  is set while the card is busy.
 - **Trust the stored value.** Set parameter replies what was stored after
   clamping, which may not be what you sent.
 - **A value can be changed from the panel** between your read and your

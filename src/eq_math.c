@@ -14,6 +14,7 @@ static double exponential(double x)
     for (u32 n = 1; n <= 32; ++n) { term *= x/n; sum += term; }
     return sum;
 }
+static double step_hz(u32 step); /* a frequency step in Hz */
 static double square_root(double x)
 {
     double y = 1;
@@ -61,7 +62,7 @@ void eq_coefficients(const struct eq_value *value, s32 out[5][5])
     for (u32 band = 0; band < 3; ++band) {
         if (!value->gain[band]) continue;
         double a = exponential(value->gain[band]*(2.302585092994046/400));
-        double w = value->frequency[band]*(6.283185307179586/48000);
+        double w = step_hz(value->frequency[band])*(6.283185307179586/48000);
         double c = cosine(w), s = sine(w), p = a+1, m = a-1, b = s*square_root(2*a);
         if (band == EQ_BAND_MID || value->q[band]) {
             /* The Mid band's own Q is broad at small gain, narrower at
@@ -87,30 +88,36 @@ static double logarithm(double x)
     for (u32 n = 3; n <= 21; n += 2) { term *= z*z; sum += term/n; }
     return exponent*0.6931471805599453 + 2*sum;
 }
-/* Band frequencies share one logarithmic 20 Hz..20 kHz position scale. */
-u16 eq_frequency(float position)
+#define LN2 0.6931471805599453
+#define CENTIHERTZ_PER_HZ 100
+#define EQ_CENTS_SPAN 12000u /* past 20 kHz from EQ_FREQUENCY_MIN */
+static double step_hz(u32 step)
 {
-    if (position <= 0) return EQ_FREQUENCY_MIN;
-    if (position >= 1) return EQ_FREQUENCY_MAX;
-    return (u16)(EQ_FREQUENCY_MIN*exponential(position*logarithm((double)EQ_FREQUENCY_MAX/EQ_FREQUENCY_MIN))+0.5);
+    if (step > EQ_STEP_MAX) step = EQ_STEP_MAX;
+    double hz = EQ_STEP_HZ_1K*exponential(((s32)step - EQ_STEP_1K)*(LN2/EQ_STEPS_PER_OCTAVE));
+    return hz > EQ_FREQUENCY_MAX ? EQ_FREQUENCY_MAX : hz;
 }
-float eq_frequency_position(u16 frequency)
+static u32 nearest(double hz)
 {
-    return (float)(logarithm((double)frequency/EQ_FREQUENCY_MIN)/logarithm((double)EQ_FREQUENCY_MAX/EQ_FREQUENCY_MIN));
+    double step = EQ_STEP_1K + logarithm(hz*(1.0/EQ_STEP_HZ_1K))*(EQ_STEPS_PER_OCTAVE/LN2);
+    return step <= 0 ? 0 : step >= EQ_STEP_MAX ? EQ_STEP_MAX : (u32)(step + 0.5);
 }
-u16 eq_frequency_step(u16 frequency, s32 delta)
+u32 eq_step_centihertz(u32 step) { return (u32)(step_hz(step)*CENTIHERTZ_PER_HZ + 0.5); }
+u32 eq_step_nearest(u32 centihertz) { return centihertz ? nearest(centihertz*(1.0/CENTIHERTZ_PER_HZ)) : 0; }
+u32 eq_step_above_min(u32 cents)
 {
-    u16 next = eq_frequency(eq_frequency_position(frequency)+(float)delta/EQ_FREQUENCY_STEPS);
-    /* Integer-Hz rounding must not trap encoder turns near the low endpoint. */
-    if (delta && next == frequency) {
-        if (delta > 0 && frequency < EQ_FREQUENCY_MAX) next++;
-        if (delta < 0 && frequency > EQ_FREQUENCY_MIN) next--;
-    }
-    return next;
+    if (cents > EQ_CENTS_SPAN) cents = EQ_CENTS_SPAN; /* the series stays exact */
+    return nearest(EQ_FREQUENCY_MIN*exponential(cents*(LN2/EQ_CENTS_PER_OCTAVE)));
 }
+/* The graphs' logarithmic 20 Hz..20 kHz scale. */
+float eq_frequency_position(float hz)
+{
+    return (float)(logarithm(hz*(1.0/EQ_FREQUENCY_MIN))/logarithm((double)EQ_FREQUENCY_MAX/EQ_FREQUENCY_MIN));
+}
+float eq_step_position(u32 step) { return eq_frequency_position((float)step_hz(step)); }
 u16 eq_frequency_shift(u16 frequency, float octaves, u16 low, u16 high)
 {
-    double shifted = frequency*exponential(octaves*0.6931471805599453);
+    double shifted = frequency*exponential(octaves*LN2);
     return shifted <= low ? low : shifted >= high ? high : (u16)(shifted+0.5);
 }
 /* Response in dB mapped to rows top..bottom (+/-EQ_GRAPH_DB about the
@@ -179,7 +186,7 @@ static void filter_design(const struct filter_value *v, struct filter_design *d)
     double r = v->resonance*(1.0/FILTER_RESONANCE_MAX);
     double k = r < 1 ? FILTER_DAMPING_MAX*exponential(FILTER_DAMPING_POWER*logarithm(1 - r)) : 0;
     if (k < FILTER_DAMPING_MIN) k = FILTER_DAMPING_MIN;
-    d->cutoff[0] = d->cutoff[1] = v->cutoff;
+    d->cutoff[0] = d->cutoff[1] = step_hz(v->cutoff);
     d->damping[0] = d->damping[1] = k;
     switch (v->type) {
     case FILTER_LP24:
@@ -205,13 +212,13 @@ static void filter_design(const struct filter_value *v, struct filter_design *d)
         /* A low-pass on the cutoff beside a high-pass Spread above it. */
         d->mix1[MIX_INPUT] = 1; d->mix2[MIX_LP1] = 0.5; d->mix2[MIX_HP] = 0.55;
         d->damping[0] = k*0.5; d->damping[1] = k*1.25 < 1.1 ? k*1.25 : 1.1;
-        d->cutoff[1] = v->cutoff*exponential(v->extra*FILTER_EXTRA_OCTAVES_PER_STEP*0.6931471805599453);
+        d->cutoff[1] = d->cutoff[0]*exponential(v->extra*FILTER_EXTRA_OCTAVES_PER_STEP*0.6931471805599453);
         break;
     case FILTER_DUAL:
         /* A low-pass on the cutoff beside a band-pass that Offset moves either way. */
         d->damping[0] = k*0.5; d->damping[1] = k*1.25 < 1.1 ? k*1.25 : 1.1;
         d->mix1[MIX_INPUT] = 1; d->mix2[MIX_LP1] = 0.5; d->mix2[MIX_BP] = 0.5*d->damping[1];
-        d->cutoff[1] = v->cutoff*exponential((v->extra - FILTER_DUAL_CENTRE)*FILTER_EXTRA_OCTAVES_PER_STEP*0.6931471805599453);
+        d->cutoff[1] = d->cutoff[0]*exponential((v->extra - FILTER_DUAL_CENTRE)*FILTER_EXTRA_OCTAVES_PER_STEP*0.6931471805599453);
         break;
     default: break;
     }
@@ -303,4 +310,3 @@ void filter_curve(const struct filter_value *value, u32 points, u8 *out, s32 top
         out[n] = (u8)(y < top ? top : y > bottom ? bottom : y);
     }
 }
-u16 eq_frequency_from_q16(u32 q16) { return eq_frequency(q16*(1.0f/65536)); }

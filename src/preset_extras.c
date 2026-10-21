@@ -1,30 +1,44 @@
 #include "eq.h"
 
-/* What a preset keeps beyond the stock model: the channel and zone EQ and
- * the grain settings.
+/* Preset settings beyond the stock model: channel and zone EQ, channel and
+ * zone filter, and grain settings.
  *
- * The stock firmware holds every preset of the folder in a RAM library,
- * parsed from prstNNN.yml when the folder loads. A preset load copies a
- * library record into the working model; Save copies it back and rewrites
- * the file. The extras take the same route in a table beside the library: a
- * slot is filled from the lines below as the stock parser reads them, copied
- * to the live settings on a load and from them on Save, and appended to the
- * file after the stock writer. Stock firmware ignores the lines (their keys
- * are unknown to it) and drops them when it saves.
+ * Stock keeps every preset in the folder in a RAM library, parsed from
+ * prstNNN.yml when the folder loads. Loading a preset copies its library
+ * record to the working model. Save copies it back and rewrites the file.
+ * The extras follow the same path in a table beside the library:
+ * - parsing fills the preset's slot from the lines below,
+ * - loading copies the slot to the live settings,
+ * - Save copies the live settings to the slot and appends the lines to the
+ *   file after stock's own.
+ * Stock firmware ignores these keys on load and drops them on save.
  *
- *   EQ<c> : on hpf, then frequency gain q for Low, Mid and High
+ * Lines (channels and zones numbered from 1):
+ *   ExtrasFormat : EXTRAS_FORMAT, always first. Missing means format 1
+ *     (builds before 1.0.0).
+ *   EQ<c> : on hpf, then frequency gain q for Low, Mid and High.
+ *     Frequencies in Hz, as for FILT.
  *   EQCV<c> : source amount for Low frequency, Low gain, Mid frequency,
- *             Mid gain, High frequency, High gain and HPF
+ *     Mid gain, High frequency, High gain, HPF
  *   EQ<c>Z<z>, EQCV<c>Z<z> : the same for a zone with its own EQ
- *   FILT<c> : type cutoff resonance extra
- *   FILTCV<c> : source amount for Cutoff, Resonance, Extra and Type
+ *   FILT<c> : type cutoff resonance extra. Cutoff in Hz: whole when that
+ *     loads the same step, otherwise two decimals.
+ *   FILTCV<c> : source amount for Cutoff, Resonance, Extra, Type
  *   FILT<c>Z<z>, FILTCV<c>Z<z> : the same for a zone with its own filter
- *   Grain : channel size overlap spray detune octave reverse pan shape scan slide skew
- *   GrainCV : source amount for each route
+ *   FILTR<c>, FILTR<c>Z<z> : stereo pair right-side cutoff offset, in cents
+ *     (10 per step). Written only when not 0, after the FILT line.
+ *   Grain<c> : on size overlap spray detune octave reverse pan shape scan
+ *     slide skew. on is 1 for the channel that plays grains.
+ *   GrainCV<c> : source amount for each grain route
+ * Format 1 grain lines, read into all eight channels:
+ *   Grain : channel size overlap ... skew (channel 0: none plays)
+ *   GrainCV : source amount for each grain route
  *
- * Channels and zones count from 1 and Grain's channel 0 is off. Values are
- * the integers of eq.h and patch.h. Only lines that differ from the
- * defaults are written, so a preset without extras is the stock file. */
+ * The reader accepts every format. The writer writes only the current one.
+ * Older builds ignore lines whose number count does not match theirs, so
+ * they ignore Grain<c> (one number more than format 1's Grain line).
+ * Values are the integers of eq.h and patch.h. Only lines that differ from
+ * the defaults are written; a preset with no extras is the stock file. */
 
 #define PRESET_LIBRARY_BASE       0x80116bccu
 #define PRESET_RECORD_BYTES       0x1660u   /* PRESET_RECORD_SIZE */
@@ -37,6 +51,14 @@
 #define EQ_NUMBERS                11u       /* on, hpf, three bands of three */
 #define FILTER_NUMBERS            4u        /* type, cutoff, resonance, extra */
 #define NUMBERS_MAX               16u
+/* The numbers that are frequencies, held here in hundredths of a hertz:
+ * FILT's cutoff and EQ's three band frequencies. */
+#define FILTER_DECIMALS           (1u << 1)
+#define EQ_DECIMALS               ((1u << 2) | (1u << 5) | (1u << 8))
+#define NO_DECIMALS               0u
+#define CENTS_PER_UNIT            100       /* hundredths: a frequency's decimals */
+#define CENTS_PER_STEP            10        /* a cutoff step, 1/120 octave */
+#define EXTRAS_FORMAT             2         /* per-channel grain, frequencies as steps, FILTR */
 #define LINE_BYTES                112u
 #define KEY_BYTES                 12u
 
@@ -58,7 +80,7 @@ u32 patch_extras_saved;
 static struct extras *library[PRESET_LIBRARY_RECORDS], *spare;
 
 const struct grain_range grain_ranges[GRAIN_FIELDS] = {
-    {0, CHANNELS, 0},   /* the channel playing grains */
+    {0, 1, 0},          /* this channel plays grains */
     {5, 20000, 600},    /* size, 0.1 ms */
     {25, 800, 400},     /* overlap, percent: grains sounding at once x100 */
     {0, 2000, 20},      /* spray, ms of random position */
@@ -79,10 +101,12 @@ static void defaults(struct extras *e)
         eq_default(&e->channels[ch]);
         filter_default(&e->filters[ch], ch);
     }
-    for (u32 f = 0; f < GRAIN_FIELDS; ++f) e->grain.value[f] = grain_ranges[f].initial;
-    for (u32 r = 0; r < GRAIN_ROUTES; ++r) {
-        e->grain.source[r] = EQ_CV_SOURCE_OFF;
-        e->grain.amount[r] = EQ_CV_AMOUNT_MAX;
+    for (u32 ch = 0; ch < CHANNELS; ++ch) {
+        for (u32 f = 0; f < GRAIN_FIELDS; ++f) e->grain[ch].value[f] = grain_ranges[f].initial;
+        for (u32 r = 0; r < GRAIN_ROUTES; ++r) {
+            e->grain[ch].source[r] = EQ_CV_SOURCE_OFF;
+            e->grain[ch].amount[r] = EQ_CV_AMOUNT_MAX;
+        }
     }
 }
 
@@ -157,7 +181,7 @@ static void put_eq(struct eq_value *v, const s32 *n)
     v->on = n[0] != 0;
     v->hpf = (u16)(n[1] ? clamp(n[1], EQ_HPF_MIN, EQ_HPF_MAX) : 0);
     for (u32 band = 0; band < 3; ++band) {
-        v->frequency[band] = (u16)clamp(n[2+3*band], EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+        v->frequency[band] = (u16)eq_step_nearest((u32)clamp(n[2+3*band], 0, EQ_FREQUENCY_MAX*CENTS_PER_UNIT));
         v->gain[band] = (signed short)clamp(n[3+3*band], -EQ_GAIN_MAX, EQ_GAIN_MAX);
         v->q[band] = (u8)clamp(n[4+3*band], EQ_Q_OWN, EQ_Q_STEPS);
     }
@@ -167,20 +191,21 @@ static void get_eq(const struct eq_value *v, s32 *n)
 {
     n[0] = v->on; n[1] = v->hpf;
     for (u32 band = 0; band < 3; ++band) {
-        n[2+3*band] = v->frequency[band]; n[3+3*band] = v->gain[band]; n[4+3*band] = v->q[band];
+        n[2+3*band] = (s32)eq_step_centihertz(v->frequency[band]); n[3+3*band] = v->gain[band]; n[4+3*band] = v->q[band];
     }
 }
 
 static void put_filter(struct filter_value *v, const s32 *n)
 {
     v->type = (u8)clamp(n[0], FILTER_OFF, FILTER_TYPES - 1);
-    v->cutoff = (u16)clamp(n[1], EQ_FREQUENCY_MIN, EQ_FREQUENCY_MAX);
+    v->cutoff = (u16)eq_step_nearest((u32)clamp(n[1], 0, EQ_FREQUENCY_MAX*CENTS_PER_UNIT));
     v->resonance = (u8)clamp(n[2], 0, FILTER_RESONANCE_MAX);
     v->extra = (u8)clamp(n[3], 0, FILTER_EXTRA_MAX);
 }
 static void get_filter(const struct filter_value *v, s32 *n)
 {
-    n[0] = v->type; n[1] = v->cutoff; n[2] = v->resonance; n[3] = v->extra;
+    n[0] = v->type; n[1] = (s32)eq_step_centihertz(v->cutoff);
+    n[2] = v->resonance; n[3] = v->extra;
 }
 
 /* A signed decimal after spaces and the key's colon; null when there is none. */
@@ -195,6 +220,18 @@ static const char *number(const char *s, s32 *out)
     *out = negative ? -value : value;
     return s;
 }
+/* A decimal with up to two places (more are dropped), in hundredths. */
+static const char *hundredths(const char *s, s32 *out)
+{
+    s32 whole;
+    if (!(s = number(s, &whole))) return 0;
+    s32 fraction = 0, scale = CENTS_PER_UNIT;
+    if (*s == '.')
+        for (++s; *s >= '0' && *s <= '9'; ++s)
+            if (scale /= 10) fraction += (*s - '0')*scale;
+    *out = whole*CENTS_PER_UNIT + (whole < 0 ? -fraction : fraction);
+    return s;
+}
 
 /* One line of a preset file: store it when it is one of ours and complete. */
 static void line(u32 model, const char *s)
@@ -205,34 +242,48 @@ static void line(u32 model, const char *s)
     s += grain ? 5 : filter ? 4 : 2;
     u32 cv = !strncasecmp(s, "CV", 2), channel = 0, zone = NO_ZONE;
     if (cv) s += 2;
-    if (!grain) {
+    u32 right = filter && !cv && (*s == 'R' || *s == 'r');
+    if (right) ++s;
+    /* "Grain" with no channel number: format 1, one set for all eight channels. */
+    u32 every = grain && (*s < '1' || *s > '9');
+    if (!every) {
         channel = (u32)(*s++ - '1');
         if (channel >= CHANNELS) return;
-        if (*s == 'Z' || *s == 'z') {
+        if (!grain && (*s == 'Z' || *s == 'z')) {
             zone = (u32)(s[1] - '1');
             if (zone >= ZONES) return;
             s += 2;
         }
     }
-    u32 wanted = cv ? 2*(grain ? GRAIN_ROUTES : filter ? FILTER_MOD_COUNT : EQ_MOD_COUNT)
+    u32 wanted = right ? 1 : cv ? 2*(grain ? GRAIN_ROUTES : filter ? FILTER_MOD_COUNT : EQ_MOD_COUNT)
                     : grain ? GRAIN_FIELDS : filter ? FILTER_NUMBERS : EQ_NUMBERS, count = 0;
     s32 n[NUMBERS_MAX];
-    while (count < wanted && (s = number(s, &n[count]))) ++count;
+    u32 decimals = cv || grain ? NO_DECIMALS : filter ? FILTER_DECIMALS : EQ_DECIMALS;
+    while (count < wanted &&
+           (s = decimals & (1u << count) ? hundredths(s, &n[count]) : number(s, &n[count]))) ++count;
     /* A line with more or fewer numbers than ours has another layout. */
     s32 more;
     if (count != wanted || number(s, &more)) return;
     struct extras *e = destination(model);
     if (!e) return;
     if (grain) {
-        if (cv) put_routes(e->grain.source, e->grain.amount, n, GRAIN_ROUTES);
-        else for (u32 f = 0; f < GRAIN_FIELDS; ++f)
-            e->grain.value[f] = (s16)clamp(n[f], grain_ranges[f].low, grain_ranges[f].high);
+        for (u32 ch = every ? 0 : channel; ch < (every ? CHANNELS : channel + 1); ++ch) {
+            struct grain_settings *g = &e->grain[ch];
+            if (cv) { put_routes(g->source, g->amount, n, GRAIN_ROUTES); continue; }
+            for (u32 f = 0; f < GRAIN_FIELDS; ++f)
+                g->value[f] = (s16)clamp(n[f], grain_ranges[f].low, grain_ranges[f].high);
+            /* In format 1 the first number is the playing channel (0: none). */
+            if (every) g->value[GRAIN_ON] = n[GRAIN_ON] == (s32)ch + 1;
+        }
         return;
     }
     if (filter) {
         struct filter_value *f = zone == NO_ZONE ? &e->filters[channel] : &e->zone_filters[channel][zone];
         if (zone != NO_ZONE && !f->override) { filter_default(f, channel); f->override = 1; }
-        if (cv) put_routes(f->source, f->amount, n, FILTER_MOD_COUNT); else put_filter(f, n);
+        if (right) {
+            s32 cents = clamp(n[0], -(s32)EQ_STEP_MAX*CENTS_PER_STEP, (s32)EQ_STEP_MAX*CENTS_PER_STEP);
+            f->right = (s16)((cents + (cents < 0 ? -CENTS_PER_STEP/2 : CENTS_PER_STEP/2))/CENTS_PER_STEP);
+        } else if (cv) put_routes(f->source, f->amount, n, FILTER_MOD_COUNT); else put_filter(f, n);
         return;
     }
     struct eq_value *v = zone == NO_ZONE ? &e->channels[channel] : &e->zones[channel][zone];
@@ -240,11 +291,27 @@ static void line(u32 model, const char *s)
     if (cv) put_routes(v->source, v->amount, n, EQ_MOD_COUNT); else put_eq(v, n);
 }
 
-static void write_line(FIL *file, const char *key, const s32 *n, u32 count)
+/* `decimals` marks the numbers held in hundredths of a hertz. One is
+ * written whole when that loads the same step, so files older firmware can
+ * read stay that way where they can. */
+static u32 format_written;  /* the ExtrasFormat line has been written to this file */
+static void write_line(FIL *file, const char *key, const s32 *n, u32 count, u32 decimals)
 {
     char text[LINE_BYTES];
-    u32 done, at = (u32)sprintf(text, "  %s :", key);
-    for (u32 i = 0; i < count; ++i) at += (u32)sprintf(text + at, " %d", n[i]);
+    u32 done, at;
+    if (!format_written) {
+        format_written = 1;
+        at = (u32)sprintf(text, "  ExtrasFormat : %d\n", EXTRAS_FORMAT);
+        resource_write_bytes(file, text, at, &done);
+    }
+    at = (u32)sprintf(text, "  %s :", key);
+    for (u32 i = 0; i < count; ++i) {
+        s32 whole = (n[i] + CENTS_PER_UNIT/2)/CENTS_PER_UNIT;
+        if (!(decimals & (1u << i))) at += (u32)sprintf(text + at, " %d", n[i]);
+        else if (eq_step_nearest((u32)(whole*CENTS_PER_UNIT)) == eq_step_nearest((u32)n[i]))
+            at += (u32)sprintf(text + at, " %d", whole);
+        else at += (u32)sprintf(text + at, " %d.%02d", n[i]/CENTS_PER_UNIT, n[i]%CENTS_PER_UNIT);
+    }
     text[at++] = '\n';
     resource_write_bytes(file, text, at, &done);
 }
@@ -262,11 +329,11 @@ static void write_eq(FIL *file, const struct eq_value *v, u32 channel, u32 zone)
     if (zone != NO_ZONE) sprintf(suffix, "Z%d", zone + 1);
     if (zone != NO_ZONE || memcmp(n, standard, sizeof(standard))) {
         sprintf(key, "EQ%d%s", channel + 1, suffix);
-        write_line(file, key, n, EQ_NUMBERS);
+        write_line(file, key, n, EQ_NUMBERS, EQ_DECIMALS);
     }
     if (get_routes(v->source, v->amount, n, EQ_MOD_COUNT)) {
         sprintf(key, "EQCV%d%s", channel + 1, suffix);
-        write_line(file, key, n, 2*EQ_MOD_COUNT);
+        write_line(file, key, n, 2*EQ_MOD_COUNT, NO_DECIMALS);
     }
 }
 
@@ -282,11 +349,16 @@ static void write_filter(FIL *file, const struct filter_value *v, u32 channel, u
     if (zone != NO_ZONE) sprintf(suffix, "Z%d", zone + 1);
     if (zone != NO_ZONE || memcmp(n, standard, sizeof(standard))) {
         sprintf(key, "FILT%d%s", channel + 1, suffix);
-        write_line(file, key, n, FILTER_NUMBERS);
+        write_line(file, key, n, FILTER_NUMBERS, FILTER_DECIMALS);
     }
     if (get_routes(v->source, v->amount, n, FILTER_MOD_COUNT)) {
         sprintf(key, "FILTCV%d%s", channel + 1, suffix);
-        write_line(file, key, n, 2*FILTER_MOD_COUNT);
+        write_line(file, key, n, 2*FILTER_MOD_COUNT, NO_DECIMALS);
+    }
+    if (v->right) {
+        n[0] = v->right*CENTS_PER_STEP;
+        sprintf(key, "FILTR%d%s", channel + 1, suffix);
+        write_line(file, key, n, 1, NO_DECIMALS);
     }
 }
 
@@ -295,6 +367,7 @@ static void append(const char *path, const struct extras *e)
     FIL file;
     s32 n[NUMBERS_MAX];
     if (fatfs_open(&file, path, FA_WRITE)) return;
+    format_written = 0;
     if (!resource_seek_absolute(&file, file.words[FIL_FILE_SIZE / 4])) {
         for (u32 ch = 0; ch < CHANNELS; ++ch) {
             write_eq(&file, &e->channels[ch], ch, NO_ZONE);
@@ -304,13 +377,19 @@ static void append(const char *path, const struct extras *e)
             for (u32 z = 0; z < ZONES; ++z)
                 if (e->zone_filters[ch][z].override) write_filter(&file, &e->zone_filters[ch][z], ch, z);
         }
-        u32 differs = 0;
-        for (u32 f = 0; f < GRAIN_FIELDS; ++f) {
-            n[f] = e->grain.value[f];
-            differs |= n[f] != grain_ranges[f].initial;
+        for (u32 ch = 0; ch < CHANNELS; ++ch) {
+            const struct grain_settings *g = &e->grain[ch];
+            char key[KEY_BYTES];
+            u32 differs = 0;
+            for (u32 f = 0; f < GRAIN_FIELDS; ++f) {
+                n[f] = g->value[f];
+                differs |= n[f] != grain_ranges[f].initial;
+            }
+            sprintf(key, "Grain%d", ch + 1);
+            if (differs) write_line(&file, key, n, GRAIN_FIELDS, NO_DECIMALS);
+            sprintf(key, "GrainCV%d", ch + 1);
+            if (get_routes(g->source, g->amount, n, GRAIN_ROUTES)) write_line(&file, key, n, 2*GRAIN_ROUTES, NO_DECIMALS);
         }
-        if (differs) write_line(&file, "Grain", n, GRAIN_FIELDS);
-        if (get_routes(e->grain.source, e->grain.amount, n, GRAIN_ROUTES)) write_line(&file, "GrainCV", n, 2*GRAIN_ROUTES);
     }
     resource_close(&file);
 }

@@ -1,19 +1,27 @@
 #include "ext.h"
 
-/* The Filter page, which Envelope steps to from its own page (src/eq_panel.c
- * owns the cursor, the edit state and the screen). It edits the channel's
- * filter, or a zone's own, as the EQ pages do: EDIT chooses which, ENTER
- * opens the stock edit popup, and holding ENTER on EDIT lets a zone follow
- * its channel again. Holding it on Type puts the filter back to its
- * defaults, and again brings the settings back. Each setting is a stock
- * section: its value, then its CV source and amount under it. The model is
- * src/filter.S and src/eq_model.c. */
+/* The Filter page. Pressing Envelope on the Envelope page opens it.
+ * src/eq_panel.c owns the cursor, the edit state and the screen.
+ *
+ * - EDIT selects the channel's filter or the selected zone's filter.
+ * - ENTER opens the stock edit popup.
+ * - Hold ENTER on EDIT: the zone uses its channel's filter again.
+ * - Hold ENTER on Type: reset the filter to defaults. Hold again: restore it.
+ * - A hold acts on release. It does nothing if the encoder turned while
+ *   ENTER was held (that is a coarse step, see panel_step).
+ * - Stereo pair: pressing the Stereo/Right channel's button selects the
+ *   right side. Cutoff then shows and sets the right side's cutoff, stored
+ *   as an offset from the master's. The graph shows both sides.
+ *
+ * Each setting shows its value, with its CV source and amount below it.
+ * The filter itself is src/filter.S and src/eq_model.c. */
 
 int sprintf(char *buffer, const char *format, ...);
 
 #define COLOR_GRAY            0x14a5u
 #define COLOR_LIGHT_GRAY      0x18c6u
 #define COLOR_DARK_GRAY       0x0c63u
+#define COLOR_BLUE            0x1f02u   /* byte-swapped RGB565 0x021f: the side not being edited */
 #define GRAPH_LEFT            12
 #define GRAPH_TOP             24
 #define GRAPH_WIDTH           116
@@ -29,13 +37,15 @@ int sprintf(char *buffer, const char *format, ...);
 #define POPUP_DY              6      /* the popup's top below the selected line */
 #define POPUP_Y_MAX           104
 #define TEXT_BYTES            24u
-#define RESONANCE_COARSE      2      /* steps of the resonance per click */
-#define EXTRA_COARSE          2
 #define OWNER_SLOTS_PER_CHANNEL 9u   /* a channel's eight zones, then the channel's own filter */
 #define OWNER_CHANNEL_SLOT    8u
+/* Coarse step sizes: cutoff 1 semitone, Resonance and Extra 10, CV amount 0.10. */
+#define SEMITONES_PER_OCTAVE  12
+#define CUTOFF_COARSE         (EQ_STEPS_PER_OCTAVE / SEMITONES_PER_OCTAVE)
+#define LEVEL_COARSE          10
+#define AMOUNT_COARSE         10
 
-/* The cursor runs through each setting's value, CV source and CV amount,
- * then EDIT. */
+/* Cursor order: for each setting, its value, CV source and CV amount; then EDIT. */
 enum { SETTING_TYPE, SETTING_CUTOFF, SETTING_RESONANCE, SETTING_EXTRA, SETTINGS };
 enum { PART_VALUE, PART_SOURCE, PART_AMOUNT, PARTS };
 #define FIELD_EDIT (SETTINGS*PARTS)
@@ -54,8 +64,8 @@ static const struct {
 };
 static u32 setting_of(u32 field) { return field / PARTS; }
 static u32 part_of(u32 field) { return field % PARTS; }
-/* Extra and its route show only for the types that use Extra; the cursor
- * skips them for the others. */
+/* Extra and its CV route are hidden, and skipped by the cursor, for types
+ * that do not use Extra. */
 static u32 shown(u32 type, u32 field)
 {
     return field == FIELD_EDIT || setting_of(field) != SETTING_EXTRA || filter_extra_name(type) != 0;
@@ -68,6 +78,13 @@ static const struct filter_value *value(u32 channel)
 {
     u32 z = zone_index();
     return panel_scope_zone() && filter_zones[channel][z].override ? &filter_zones[channel][z] : &filter_channels[channel];
+}
+/* Nonzero when the page edits a stereo pair's right side. */
+static u32 right_side(void) { return panel_stereo_right(); }
+/* Nonzero when the next channel is this channel's Stereo/Right partner. */
+static u32 paired(u32 channel)
+{
+    return channel + 1 < PRESET_CHANNELS && channel_record(channel + 1)[CHANNEL_MODE] == CHANNEL_MODE_STEREO_RIGHT;
 }
 static u32 count(u32 channel)
 {
@@ -90,9 +107,9 @@ static void apply(u32 channel, struct filter_value next)
     bump();
 }
 
-/* The settings a hold on Type put back to the defaults, and whose they were
- * (0: none), until a hold restores them, the preset is saved or loaded,
- * or another filter is cleared. */
+/* The settings saved by the last reset (hold on Type), for the next hold to
+ * restore. held_owner says which filter they belong to (0: none). They are
+ * dropped when a preset is saved or loaded, or another filter is reset. */
 static struct filter_value held;
 static u32 held_owner, held_generation;
 static u32 generation(void) { return patch_grain_loaded + patch_extras_saved; }
@@ -100,7 +117,7 @@ static u32 owner(u32 channel)
 {
     return 1 + channel*OWNER_SLOTS_PER_CHANNEL + (panel_scope_zone() ? zone_index() : OWNER_CHANNEL_SLOT);
 }
-/* The defaults, with the routes kept. */
+/* Default settings, keeping the current CV routes. */
 static void flat(u32 channel, struct filter_value *next)
 {
     const struct filter_value *v = value(channel);
@@ -118,7 +135,7 @@ static u32 hold_action(u32 channel, u32 field)
     if (memcmp(&next, value(channel), sizeof(next))) return HOLD_CLEAR;
     return held_owner == owner(channel) && held_generation == generation() ? HOLD_RESTORE : HOLD_NONE;
 }
-static void hold(u32 channel, u32 cursor)
+static u32 hold(u32 channel, u32 cursor)
 {
     struct filter_value next;
     switch (hold_action(channel, field_of(channel, cursor))) {
@@ -140,9 +157,10 @@ static void hold(u32 channel, u32 cursor)
         apply(channel, next);
         status_show("Filter restored");
         break;
-    default: return;
+    default: return 0;
     }
     bump();
+    return 1;
 }
 static u32 enter(u32 channel, u32 cursor)
 {
@@ -165,38 +183,54 @@ static void pixel(s32 x, s32 y, u16 color)
 {
     ((volatile u16 *)OLED_SHADOW_FRAMEBUFFER_BASE)[y*OLED_SIDE+x] = color;
 }
-static void format_frequency(char *out, u32 f)
+/* Cutoff text, in the EQ's frequency format: 150.4 Hz, 1.000k. */
+static void format_cutoff(char *out, u32 step)
 {
-    if (f < 1000) sprintf(out, "%d Hz", f);
-    else if (f < 10000) sprintf(out, "%d.%02dk", f/1000, (f%1000+5)/10 > 99 ? 99 : (f%1000+5)/10);
-    else sprintf(out, "%d.%dk", f/1000, (f%1000+50)/100 > 9 ? 9 : (f%1000+50)/100);
+    char number[TEXT_BYTES];
+    sprintf(out, eq_step_text(number, step) ? "%sk" : "%s Hz", number);
 }
 static void format(u32 setting, const struct filter_value *v, char *out)
 {
     switch (setting) {
     case SETTING_TYPE: sprintf(out, "%s", type_names[v->type]); break;
-    case SETTING_CUTOFF: format_frequency(out, v->cutoff); break;
+    case SETTING_CUTOFF: format_cutoff(out, right_side() ? filter_right_cutoff(v) : v->cutoff); break;
     case SETTING_RESONANCE: sprintf(out, "%d", v->resonance); break;
     default: sprintf(out, "%d", v->extra); break;
     }
 }
-static const char *setting_heading(u32 setting, u32 type)
+/* On a stereo pair, the Cutoff heading names the side: CUTOFF L or CUTOFF R. */
+static const char *setting_heading(u32 setting, const struct filter_value *v, u32 channel)
 {
+    u32 type = v->type;
+    if (setting == SETTING_CUTOFF && right_side()) return "CUTOFF R";
+    if (setting == SETTING_CUTOFF && paired(channel)) return "CUTOFF L";
     return setting == SETTING_EXTRA ? filter_extra_name(type) : settings[setting].heading;
 }
-/* The page redraws when the settings it shows change, whoever changed them. */
+/* Changes whenever the shown settings change, from any source, so the page redraws. */
 static u32 own_revision;
 static void bump(void) { own_revision++; }
 static u32 revision(void)
 {
-    u32 sum = own_revision + panel_scope_zone(), channel = panel_selected_channel();
+    u32 sum = own_revision + panel_scope_zone() + 2*right_side(), channel = panel_selected_channel();
     const u8 *bytes = (const u8 *)value(channel);
     for (u32 n = 0; n < sizeof(struct filter_value); ++n) sum = sum*31 + bytes[n];
     return sum + following(channel);
 }
 
 static u8 curve[CURVE_POINTS];
-static void draw_graph(const struct filter_value *live, u32 gray)
+static void draw_curve(const struct filter_value *live, s32 top, s32 bottom, s32 middle, u16 color)
+{
+    if (live->type == FILTER_OFF) memset(curve, middle, sizeof(curve));
+    else filter_curve(live, CURVE_POINTS, curve, top, bottom, GRAPH_DB_TOP, GRAPH_DB_BOTTOM);
+    for (u32 n = 0; n < CURVE_POINTS; ++n) {
+        s32 a = curve[n ? n-1 : 0], b = curve[n];
+        if (a > b) { s32 t = a; a = b; b = t; }
+        for (s32 y = a; y <= b; ++y) pixel(GRAPH_LEFT+1+(s32)n, y, color);
+    }
+}
+/* With a right-side offset, both curves are drawn: the side being edited in
+ * white, the other side in blue underneath. */
+static void draw_graph(const struct filter_value *live, u32 gray, u32 pair)
 {
     s32 top = GRAPH_TOP+1, bottom = GRAPH_TOP+GRAPH_HEIGHT-2;
     s32 middle = top + (bottom-top)*GRAPH_DB_TOP/(GRAPH_DB_TOP-GRAPH_DB_BOTTOM);
@@ -207,17 +241,16 @@ static void draw_graph(const struct filter_value *live, u32 gray)
     static const u8 decades[] = {26, 64, 102};
     for (u32 d = 0; d < 3; ++d)
         for (s32 y = top; y <= bottom; y += 2) pixel(GRAPH_LEFT+1+decades[d], y, COLOR_DARK_GRAY);
-    if (live->type == FILTER_OFF) memset(curve, middle, sizeof(curve));
-    else filter_curve(live, CURVE_POINTS, curve, top, bottom, GRAPH_DB_TOP, GRAPH_DB_BOTTOM);
     u16 color = live->type != FILTER_OFF && !gray ? COLOR_WHITE : COLOR_GRAY;
-    for (u32 n = 0; n < CURVE_POINTS; ++n) {
-        s32 a = curve[n ? n-1 : 0], b = curve[n];
-        if (a > b) { s32 t = a; a = b; b = t; }
-        for (s32 y = a; y <= b; ++y) pixel(GRAPH_LEFT+1+(s32)n, y, color);
-    }
+    struct filter_value right = *live;
+    right.cutoff = (u16)filter_right_cutoff(live);
+    if (!pair || !live->right) { draw_curve(right_side() ? &right : live, top, bottom, middle, color); return; }
+    u32 edited = right_side();
+    draw_curve(edited ? live : &right, top, bottom, middle, gray ? COLOR_DARK_GRAY : COLOR_BLUE);
+    draw_curve(edited ? &right : live, top, bottom, middle, color);
 }
 
-/* The setting the graph shows; live redraws it when the routes move it. */
+/* The settings the graph shows. live() redraws the graph when CV changes them. */
 static struct filter_value drawn_live;
 static u32 live(u32 channel)
 {
@@ -227,7 +260,7 @@ static u32 live(u32 channel)
     filter_live(v, channel, &now);
     if (!memcmp(&now, &drawn_live, sizeof(now))) return 0;
     drawn_live = now;
-    draw_graph(&now, following(channel));
+    draw_graph(&now, following(channel), paired(channel));
     return 1;
 }
 
@@ -236,7 +269,8 @@ static void popup(u32 field, const struct filter_value *v)
 {
     char line[TEXT_BYTES];
     u32 setting = setting_of(field), part = part_of(field), r = settings[setting].route;
-    const char *title = setting == SETTING_EXTRA ? filter_extra_name(v->type) : settings[setting].title;
+    const char *title = setting == SETTING_EXTRA ? filter_extra_name(v->type) :
+                        setting == SETTING_CUTOFF && right_side() ? "Right Cutoff" : settings[setting].title;
     if (part == PART_VALUE) {
         format(setting, v, line);
         ui_render_parameter_row(UI_PARAMETER_ROW_STYLE, 0, popup_y(settings[setting].y + VALUE_DY + POPUP_DY), line,
@@ -265,12 +299,12 @@ static void draw(u32 channel, u32 cursor, u32 editing)
     ui_draw_zone_label_blinking_when_synced(zone_index(), ZONE_LABEL_X, TITLE_Y);
     /* The graph shows the filter as its routes move it now. */
     filter_live(v, channel, &drawn_live);
-    draw_graph(&drawn_live, gray);
+    draw_graph(&drawn_live, gray, paired(channel));
     for (u32 s = 0; s < SETTINGS; ++s) {
         if (!shown(v->type, s*PARTS)) continue;
         s32 x = settings[s].x, y = settings[s].y;
         u32 r = settings[s].route;
-        heading(x, y, setting_heading(s, v->type));
+        heading(x, y, setting_heading(s, v, channel));
         format(s, v, line);
         text(x, y + VALUE_DY, line, selected == s*PARTS + PART_VALUE, gray);
         u32 at = selected / PARTS == s && selected != FIELD_EDIT ? part_of(selected) : PART_VALUE;
@@ -291,12 +325,15 @@ static void step(u32 channel, u32 cursor, s32 delta)
     if (part_of(field) == PART_SOURCE)
         next.source[r] = (signed char)clamp(next.source[r] + delta, EQ_CV_SOURCE_OFF, EQ_CV_SOURCE_MAX);
     else if (part_of(field) == PART_AMOUNT)
-        next.amount[r] = (signed char)clamp(next.amount[r] + delta, -EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX);
+        next.amount[r] = (signed char)clamp(panel_step(next.amount[r], delta, AMOUNT_COARSE, 0), -EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX);
     else switch (setting) {
     case SETTING_TYPE: next.type = (u8)clamp((s32)next.type + delta, FILTER_OFF, FILTER_TYPES - 1); break;
-    case SETTING_CUTOFF: next.cutoff = eq_frequency_step((u16)next.cutoff, delta); break;
-    case SETTING_RESONANCE: next.resonance = (u8)clamp((s32)next.resonance + delta*RESONANCE_COARSE, 0, FILTER_RESONANCE_MAX); break;
-    default: next.extra = (u8)clamp((s32)next.extra + delta*EXTRA_COARSE, 0, FILTER_EXTRA_MAX); break;
+    case SETTING_CUTOFF:
+        if (right_side()) next.right = (s16)(clamp(panel_step((s32)filter_right_cutoff(&next), delta, CUTOFF_COARSE, EQ_STEP_1K), 0, EQ_STEP_MAX) - next.cutoff);
+        else next.cutoff = (u16)clamp(panel_step(next.cutoff, delta, CUTOFF_COARSE, EQ_STEP_1K), 0, EQ_STEP_MAX);
+        break;
+    case SETTING_RESONANCE: next.resonance = (u8)clamp(panel_step(next.resonance, delta, LEVEL_COARSE, 0), 0, FILTER_RESONANCE_MAX); break;
+    default: next.extra = (u8)clamp(panel_step(next.extra, delta, LEVEL_COARSE, 0), 0, FILTER_EXTRA_MAX); break;
     }
     apply(channel, next);
 }
@@ -313,7 +350,10 @@ static void position(u32 channel, u32 cursor, u32 q16)
     else if (part_of(field) == PART_AMOUNT) next.amount[r] = (signed char)linear(-EQ_CV_AMOUNT_MAX, EQ_CV_AMOUNT_MAX, q16);
     else switch (setting) {
     case SETTING_TYPE: next.type = (u8)clamp((s32)((q16*FILTER_TYPES) >> 16), FILTER_OFF, FILTER_TYPES - 1); break;
-    case SETTING_CUTOFF: next.cutoff = eq_frequency_from_q16(q16); break;
+    case SETTING_CUTOFF:
+        if (right_side()) next.right = (s16)(linear(0, EQ_STEP_MAX, q16) - next.cutoff);
+        else next.cutoff = (u16)linear(0, EQ_STEP_MAX, q16);
+        break;
     case SETTING_RESONANCE: next.resonance = (u8)linear(0, FILTER_RESONANCE_MAX, q16); break;
     default: next.extra = (u8)linear(0, FILTER_EXTRA_MAX, q16); break;
     }
@@ -326,12 +366,12 @@ const struct panel_page filter_page = {
 
 void filter_page_init(void) { patch_envelope_page = &filter_page; }
 
-/* Stock binds a double press of Envelope everywhere: zero-crossing mode for
- * Sample Start/End and Loop boundary edits. A record with a double callback
- * holds every single press until the 600-tick double window closes, and a
- * second press inside it is taken as the double, so Envelope from any other
- * page answered late or not at all. The double press stays bound on the
- * pages whose boundary edits snap to zero crossings and nowhere else. */
+/* Stock binds a double press of Envelope on every page. It toggles
+ * zero-crossing mode for Sample Start/End and Loop edits. While a double
+ * press is bound, every single press waits for the 600-tick double-press
+ * window, and a second press in that window counts as the double. That made
+ * Envelope slow or unresponsive on other pages. The double press is now
+ * bound only on the pages that snap to zero crossings. */
 void zone_editor_zero_crossing_status_toggle(u32 *context, u32 argument);
 #define PANEL_ENVELOPE                 25u   /* FRONT_PANEL_ENVELOPE_RECORD_INDEX */
 #define PANEL_DOUBLE                   0x20u /* FRONT_PANEL_RECORD_DOUBLE_CALLBACK */

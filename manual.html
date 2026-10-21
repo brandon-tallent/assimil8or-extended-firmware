@@ -170,7 +170,7 @@ footer p { margin-bottom:.6rem; }
 
 <main>
 <h2 id="introduction">Introduction</h2>
-<p>This guide will provide everything you need to know about the Tallent Edition, an unofficial extension to your Assimil8or’s software.</p>
+<p>The Tallent Edition is an unofficial extension to the Assimil8or’s software.</p>
 <p>If you already use an Assimil8or, read on for what’s new.</p>
 <p>Everything in Rossum’s Operation Manual and New Features Guides still applies. The Tallent Edition adds to Assimil8or software 3.04. It doesn’t take anything away, and the new features are reached through existing buttons and change nothing until used.</p>
 <p class="note"><b>Note</b> This is an independent project. It is not made, tested or supported by Rossum Electro-Music. Report problems and ask questions at <a class="address" href="https://github.com/brandon-tallent/assimil8or-extended-firmware/issues">github.com/brandon-tallent/assimil8or-extended-firmware/issues</a>.</p>
@@ -223,7 +223,7 @@ footer p { margin-bottom:.6rem; }
 <div><dt>Sample button</dt><dd>On the Grain pages, <kbd>Sample</kbd> starts a resample.</dd></div>
 <div><dt>Presets</dt><dd>EQ, filter and grain settings are saved with each preset and return when you load it.</dd></div>
 <div><dt>Unsaved Changes Indicator</dt><dd>The yellow Unsaved Changes indicator now also flashes for unsaved EQ, filter and grain edits.</dd></div>
-<div><dt>Data Compatibility</dt><dd>Tallent Edition presets are fully forward and backward compatible with Assimil8or 3.04. (With the exception that Rossum’s software knows nothing about EQ, filters or grains. It ignores those settings when it loads a preset, and a preset saved from it won’t have them.)</dd></div>
+<div><dt>Data Compatibility</dt><dd>Tallent Edition presets are fully forward and backward compatible with Assimil8or 3.04. (With the exception that Rossum’s software doesn’t support EQ, filters or grains. It ignores those settings when it loads a preset, and a preset saved from it won’t have them.)</dd></div>
 </dl>
 
 <h2 id="detail">New Features in Detail</h2>
@@ -236,6 +236,19 @@ footer p { margin-bottom:.6rem; }
 <p>The <kbd>Phase Mod</kbd> button works the same way: Phase Modulation, then Grain, then Grain CV, then Phase Modulation again.</p>
 <p>And so does <kbd>Envelope</kbd>: Envelope, then Filter, then Envelope again.</p>
 <p class="note"><b>Note</b> On these pages, a second press of the button used to return you to the Home page. To get there now, press any other page button twice.</p>
+<h4>Coarse Adjustment</h4>
+<p>Hold the encoder down while turning it to change a value in large steps.</p>
+<table>
+<tr><th scope="row">Frequencies, Cutoff</th><td>1 semitone</td></tr>
+<tr><th scope="row">EQ gain</th><td>1&nbsp;dB</td></tr>
+<tr><th scope="row">EQ Shape</th><td>1 octave of Q</td></tr>
+<tr><th scope="row">HPF</th><td>10&nbsp;Hz</td></tr>
+<tr><th scope="row">Grain Detune</th><td>100 cents</td></tr>
+<tr><th scope="row">Grain Size</th><td>Doubles or halves</td></tr>
+<tr><th scope="row">Grain Overlap</th><td>0.25 grain</td></tr>
+<tr><th scope="row">CV amounts</th><td>0.10</td></tr>
+<tr><th scope="row">Everything else</th><td>10</td></tr>
+</table>
 <p>Holding <kbd>Mutate</kbd> and pressing a <kbd>Channel</kbd> button still mutes that channel, exactly as before.</p>
 
 <h4>Editing on the New Pages</h4>
@@ -248,7 +261,7 @@ footer p { margin-bottom:.6rem; }
 <p class="note"><b>Note</b> A preset with no EQ, filter or grain settings is saved exactly as Rossum’s software would save it. The new settings are added to the end of the preset file only when there’s something to add.</p>
 
 <h4>Status Messages</h4>
-<p>The Tallent Edition occasionally has something to tell you in the top line of the display:</p>
+<p>Messages in the top line of the display:</p>
 <dl class="wide">
 <div><dt><samp>Extension installed</samp></dt><dd>The second software file was found on the card and installed. You’ll see this once after an installation.</dd></div>
 <div><dt><samp>Extension not found</samp></dt><dd>The second software file is missing. See <a href="#installation">Installation</a>.</dd></div>
@@ -266,7 +279,7 @@ footer p { margin-bottom:.6rem; }
 </div>
 <p>Below the graph, each band has three fields:</p>
 <dl>
-<div><dt>Frequency</dt><dd>Each band can be set anywhere from 20&nbsp;Hz to 20&nbsp;kHz. All three bands cover the full range, so they can overlap or swap order.</dd></div>
+<div><dt>Frequency</dt><dd>Each band can be set anywhere from 20&nbsp;Hz to 20&nbsp;kHz. All three bands cover the full range, so they can overlap or swap order. Each step of the encoder moves a band 1/120 of an octave; turn it faster to sweep.</dd></div>
 <div><dt>Gain</dt><dd>The range is from −18.0&nbsp;dB to +18.0&nbsp;dB for a bell and from −10.0&nbsp;dB to +10.0&nbsp;dB for a shelf, at a resolution of 0.1&nbsp;dB.</dd></div>
 <div><dt>Shape</dt><dd>Low and High start out as <b>Shelf</b>, and Mid as <b>Auto</b>, a bell that’s broad for small amounts of gain and becomes narrower as you add more. Turn any of the three up to make it a bell with a Q of your own choosing, from 0.50 to 16.0.</dd></div>
 </dl>
@@ -324,15 +337,18 @@ footer p { margin-bottom:.6rem; }
 <li><b>Band Stop</b> is a low-pass at the cutoff beside a high-pass above it, and the gap between them is the stop band. Spread sets how far above. At 0 it is a notch at the cutoff.</li>
 <li><b>Dual L/BP</b> is a low-pass at the cutoff beside a band-pass. Offset moves the band-pass from well below the cutoff at 0 to well above it at 100, and at 50 it sits on the cutoff.</li>
 </ul></dd></div>
-<div><dt>Cutoff</dt><dd>The frequency, from 20&nbsp;Hz to 20&nbsp;kHz.</dd></div>
+<div><dt>Cutoff</dt><dd>The frequency, from 20&nbsp;Hz to 20&nbsp;kHz. Each step of the encoder moves it 1/120 of an octave; turn it faster to sweep.</dd></div>
 <div><dt>Res</dt><dd>How much the filter rings around the cutoff, from 0 to 100. At 0 it is as smooth as it gets: 6&nbsp;dB down at the cutoff (12&nbsp;dB for the 24&nbsp;dB types). Around 25 it is flat up to the cutoff, and at the top it is a very sharp peak. On the 24&nbsp;dB types only one of the two filters rings.</dd></div>
-<div><dt>Spread, Offset</dt><dd>The fourth field is named for what the type does with it, from 0 to 100, and is left out for the types that have no use for one. Spread is how far above the cutoff Band Stop’s high-pass sits. Offset is where Dual L/BP’s band-pass sits, below the cutoff under 50 and above it over 50.</dd></div>
-<div><dt>Edit</dt><dd>Selects whether you’re editing the filter of the channel (Chan) or of one of its zones (Zone), as on the EQ page. A zone follows its channel until you change something while it’s selected; the values are gray until then. It’s the <b>Chan</b> or <b>Zone</b> beside the page title. To return a zone to following its channel, highlight it and hold the encoder down.</dd></div>
+<div><dt>Spread, Offset</dt><dd>The fourth field is shown for Band Stop and Dual L/BP filters only. Spread is how far above the cutoff Band Stop’s high-pass sits. Offset is where Dual L/BP’s band-pass sits, below the cutoff under 50 and above it over 50.</dd></div>
+<div><dt>Edit</dt><dd>Selects the channel’s filter (<b>Chan</b>) or the selected zone’s (<b>Zone</b>), as on the EQ page. It’s next to the page title. A zone uses its channel’s filter, shown in gray, until you change a value with the zone selected. To make a zone use its channel’s filter again, highlight <b>EDIT</b> and hold the encoder down.</dd></div>
 </dl>
-<p>To start over, highlight the type and hold the encoder down: the filter returns to Off and its defaults. The CV routes are kept. Hold again to undo.</p>
+<p>To start over, highlight the type, hold the encoder down and let it go: the filter returns to Off and its defaults. The CV routes are kept. Hold again to undo.</p>
 <p>The graph shows the filter’s response. When a CV route is moving the filter, the graph follows it.</p>
+<h4>Stereo Pairs</h4>
+<p>Filters apply to both channels in a stereo pair. The right channel filter can be offset from the master. On the Filter page, press the Stereo/Right channel’s button. The heading changes to <b>CUTOFF R</b>. Press the Master’s button to return to <b>CUTOFF L</b>. A mono channel shows <b>CUTOFF</b>.</p>
+<p>While the two sides differ, the graph shows both: the side you’re editing in white and the other in blue. Set the right side back to the left’s cutoff and the second curve goes away.</p>
 <p>Any CV input can modulate Type, Cutoff, Res and the fourth field. As elsewhere, CV A, B and C are the inputs of the channel you’re editing.</p>
-<p>With the modulation gain at +1.00, each volt moves the cutoff by two octaves, so 5&nbsp;V sweeps the whole range; Res and Extra by 20 steps; and Type by two types. The cutoff follows its CV as quickly as the module’s own pitch CV does. A modulated value stops at the end of its range, and Type CV never turns the filter off. A change of type crossfades over a few milliseconds, and the CV has to move clearly past a boundary before the type changes, so a noisy CV doesn’t flicker between two types. Extra’s route does nothing while the type has no use for Extra.</p>
+<p>With the modulation gain at +1.00, each volt moves the cutoff by two octaves, so 5&nbsp;V sweeps the whole range; Res and Extra by 20 steps; and Type by two types. The cutoff follows its CV as quickly as the module’s own pitch CV does. A modulated value stops at the end of its range. Type CV never selects Off. Type changes crossfade over a few milliseconds to avoid unwanted clicks.</p>
 <p class="note"><b>Note</b> The types don’t all play at the same level: the band-passes are louder, and Notch&nbsp;12, Band Stop and Dual L/BP about 6&nbsp;dB quieter. A loud, resonant filter clips rather than overloading. And the filter comes before the EQ, so the EQ shapes what’s left.</p>
 <p class="note tip"><b>A tip</b> Pick LP 24, turn Res up, and give Cutoff a CV from an envelope.</p>
 
@@ -342,13 +358,13 @@ footer p { margin-bottom:.6rem; }
 <figure><img alt="The Grain page on the display" src="data:image/png;base64,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" width="256" height="256"><figcaption>The Grain page</figcaption></figure>
 <div>
 <p>Grain mode plays a channel’s sample as a stream of short, overlapping slices called grains, up to eight at a time. Depending on the settings, the result ranges from a transparent time stretch to frozen, smeared or heavily scattered textures.</p>
-<p>Grain mode belongs to one channel at a time (or, for stereo grains, to a Master channel and its Stereo/Right partner).</p>
+<p>Grain mode plays one channel at a time (or, for stereo grains, a Master channel and its Stereo/Right partner). Each channel keeps its own grain settings, so you can set up several channels and switch grains between them.</p>
 </div>
 </div>
 <p>Everything else about that channel carries on as usual. You trigger it the same way, and its envelope, level, Bit Depth, EQ, pan and mix all still apply. Each grain starts wherever the channel’s playback has got to, at whatever pitch the channel is playing. That means zones, Sample Start, loops, Pitch, FM and all of their modulation steer the grains too.</p>
 <p>Here’s what the fields do:</p>
 <dl>
-<div><dt>Grain</dt><dd>On or Off for the selected channel. Turning it On for one channel turns it Off for whichever channel had it before.</dd></div>
+<div><dt>Grain</dt><dd>On or Off for the selected channel. Turning it On for one channel turns it Off for whichever channel had it before; that channel keeps its settings for next time.</dd></div>
 <div><dt>Size</dt><dd>The length of each grain, from 0.5&nbsp;msec to 2&nbsp;seconds. Short grains buzz and blur. Long ones play recognizable pieces of the sample.</dd></div>
 <div><dt>Overlap</dt><dd>How many grains play at once, from 0.25 to 8.00. At 1.00, each grain starts as the last one ends. Higher values thicken the sound. Below 1.00, silence opens up between the grains. When all eight grains are already playing, the oldest quickly fades out to make room for the next.</dd></div>
 <div><dt>Spray</dt><dd>Scatters each grain’s starting point at random by up to this amount, from 0 to 2000&nbsp;msec. A little smooths out a time stretch. Large values break a loop into scattered fragments.</dd></div>

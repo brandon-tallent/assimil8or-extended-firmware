@@ -34,6 +34,15 @@ const struct patch_identity patch_identity
     __attribute__((section(".identity"), used)) = {
         {PATCH_MAGIC_0, PATCH_MAGIC_1}, PATCH_PROTOCOL_VERSION, {0}, 0
     };
+#define VERSION_STRING(x) #x
+#define VERSION_NUMBER(x) VERSION_STRING(x)
+const u8 patch_version[PATCH_VERSION_BYTES] = {
+    PATCH_VERSION_MAJOR, PATCH_VERSION_MINOR, PATCH_VERSION_PATCH, PATCH_VERSION_DEV ? PATCH_VERSION_FLAG_DEV : 0u
+};
+/* The About screen's version line (prefs.c). The development flag is only
+ * in Identify. */
+const char patch_version_text[] = "Tallent Edition Rev v" VERSION_NUMBER(PATCH_VERSION_MAJOR) "." VERSION_NUMBER(PATCH_VERSION_MINOR)
+    "." VERSION_NUMBER(PATCH_VERSION_PATCH);
 struct counters counters;
 u32 boot_mode, boot_trial_failed;
 u32 foreground_storage_reads;

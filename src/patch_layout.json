@@ -260,6 +260,12 @@
    "site": "call of gpio_read_input_bit"
   },
   {
+   "address": "0x80042d90",
+   "instruction": "bl",
+   "target": "about_version_line",
+   "site": "call of ui_draw_text_line_at_cursor"
+  },
+  {
    "address": "0x800000fc",
    "instruction": "b",
    "target": "patch_reset_hook",

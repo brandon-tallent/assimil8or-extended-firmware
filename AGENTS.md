@@ -27,7 +27,13 @@ for new work; use existing checks and focused temporary experiments.
 
 `PROTOCOL.md` and `PRESET_FORMAT.md` are contracts other people's editors
 depend on. Change a message or a preset line only by adding to it, and
-update the document in the same commit.
+update the document in the same commit. Presets: read every layout a release
+has written, write only the current one, and raise `EXTRAS_FORMAT` when the
+written layout changes.
+
+A change users will notice adds a line under `## Unreleased` in
+`CHANGELOG.md`, in plain words, in the same commit; note what an earlier
+release makes of presets it saves. `VERSION` changes only with a release.
 
 For code changes, run `make check`; with Rossum's v3.04 download at hand,
 `A8_STOCK_APP=/path/to/app-v304-260610.zip make check` also applies the

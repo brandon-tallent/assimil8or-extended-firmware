@@ -23,6 +23,17 @@ void ui_draw_proportional_text(u32 font, s32 x, s32 y, const char *text, u32 for
 void ui_fill_outlined_box(u32 x, u32 y, u32 width, u32 height, u32 color);
 extern const char preferences_on_text[], shared_off_text[];
 
+/* About screen: draws stock's "SW Rev" line, then the release version on
+ * the blank line under it. Uses a copy of the line cursor so the rest of
+ * the stock page does not move. */
+#define LINE_CURSOR_WORDS 3u  /* line index, first-line y, line height */
+void about_version_line(u32 *cursor, const char *text, u32 color, u32 align)
+{
+    ui_draw_text_line_at_cursor(cursor, text, color, align);
+    u32 copy[LINE_CURSOR_WORDS] = {cursor[0], cursor[1], cursor[2]};
+    ui_draw_text_line_at_cursor(copy, patch_version_text, color, align);
+}
+
 static const char high_contrast_label[] = "High Contrast:";
 static const char high_contrast_key[] = "HighContrast";
 

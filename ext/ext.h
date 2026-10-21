@@ -184,8 +184,8 @@ u32 zone_remove(u32 channel, u32 zone);
 #define EQ_RECORD_BYTES           33u
 /* The filter's records run as the EQ's: u8 type, u16 cutoff, u8 resonance,
  * u8 extra, u8 own filter, 4 x s8 CV source, 4 x s8 CV amount (cutoff,
- * resonance, extra, type). */
-#define FILTER_RECORD_BYTES       14u
+ * resonance, extra, type), s16 the Stereo/Right side's cutoff offset. */
+#define FILTER_RECORD_BYTES       16u
 void eq_record(u32 index, u8 *out);
 
 /* grains.c: grain mode for one channel or stereo pair, playing the
@@ -209,6 +209,7 @@ u32 grain_set(u32 channel, u32 field, s32 value, u8 *out, u32 *count);
 u32 grain_crc(void);
 void grain_request(u32 channel, u32 field, s32 value);
 s32 grain_value(u32 channel, u32 field);
+s32 grain_target(u32 channel, u32 field);  /* grain_value, or the edit still waiting */
 s32 grain_low(u32 field);
 s32 grain_high(u32 field);
 u32 grain_revision(void);

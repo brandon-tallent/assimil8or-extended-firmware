@@ -19,7 +19,7 @@ See the [New Features Guide](https://brandon-tallent.github.io/assimil8or-extend
 
 1. Download **Assimil8or software v3.04** (`app-v304-260610.zip`) from the Downloads section of
    [Rossum's Assimil8or page](https://www.rossum-electro.com/products/assimil8or/). There is no need to unzip it.
-2. Open the patcher above and select that zip. `assimil8or-tallent-edition.zip` downloads automatically.
+2. Open the patcher above and select that zip. `assimil8or-tallent-edition-<version>.zip` downloads automatically.
 3. Unzip it and copy both files, `app` and `ext-….bin`, to the top level of your micro SD card.
 4. With the card in the front panel slot, use **Utilities > Load Software** and reboot as for any software update.
 5. Leave the card in. Shortly after the restart the top line of the display reads `Extension installed`.
@@ -30,11 +30,26 @@ downloaded HTML file in a current browser.
 
 To go back, load Rossum's own `app` with **Utilities > Load Software**.
 
+## Versions
+
+The patcher shows the version at the top of the page. On the module, go to
+**Utilities > About this Module**: the line under `SW Rev` reads
+`Tallent Edition Rev v1.0.0`. A version ending in `-dev` is a build between
+releases.
+
+[CHANGELOG.md](CHANGELOG.md) lists the changes in each release.
+[Releases](https://github.com/brandon-tallent/assimil8or-extended-firmware/releases)
+has the patcher for each release.
+
+Each release loads presets saved by earlier releases. A preset saved by a
+newer release can lose some settings in an older one. The changelog lists
+these cases.
+
 ## Writing an editor
 
 [PROTOCOL.md](PROTOCOL.md) is the complete MIDI System Exclusive protocol, with a
-runnable example. [PRESET_FORMAT.md](PRESET_FORMAT.md) describes the preset file,
-including the lines this firmware adds.
+runnable example. [PRESET_FORMAT.md](PRESET_FORMAT.md) lists the lines this firmware adds
+to preset files.
 
 ## Building from source
 

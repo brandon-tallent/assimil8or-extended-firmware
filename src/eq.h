@@ -27,7 +27,17 @@
 #define EQ_GRAPH_DB 21
 #define EQ_FREQUENCY_MIN 20u
 #define EQ_FREQUENCY_MAX 20000u
-#define EQ_FREQUENCY_STEPS 240 /* encoder clicks across the range, ~1/24 octave */
+/* A band frequency or the filter cutoff is a step of 1/EQ_STEPS_PER_OCTAVE
+ * octave, the stored value and the encoder's unit, so a step up and back
+ * always returns. 1 kHz is step EQ_STEP_1K, which puts every octave from it
+ * (125 Hz, 250 Hz ... 16 kHz) on a step. Step 0 is 20.03 Hz, and the last
+ * step is held at EQ_FREQUENCY_MAX. */
+#define EQ_STEPS_PER_OCTAVE 120
+#define EQ_STEP_1K 677
+#define EQ_STEP_MAX 1196
+#define EQ_STEP_HZ_1K 1000
+#define EQ_STEP_150HZ 349     /* 150.35 Hz, the Low band's default */
+#define EQ_STEP_10K 1076      /* 10.02 kHz, the High band's default */
 #define EQ_HPF_MIN 20u
 #define EQ_HPF_MAX 350u
 #define EQ_UNITY 268435456
@@ -41,16 +51,17 @@ enum { EQ_MOD_LOW_FREQUENCY, EQ_MOD_LOW_GAIN, EQ_MOD_MID_FREQUENCY, EQ_MOD_MID_G
 /* At +1.00 a volt moves a frequency one octave or a gain 2 dB. */
 #define EQ_CV_GAIN_TENTHS_PER_VOLT 20
 struct eq_value {
-    u16 hpf; signed short gain[3]; u16 frequency[3]; u8 on, override;
+    u16 hpf; signed short gain[3]; u16 frequency[3] /* steps, EQ_STEP_* */; u8 on, override;
     signed char source[EQ_MOD_COUNT], amount[EQ_MOD_COUNT];
     u8 q[3], reserved; /* reserved stays zero: values compare by memcmp */
 };
-/* The channel filter (filter.S; eq_model.c publishes it, eq_math.c designs it): a type, the cutoff in Hz
- * (EQ_FREQUENCY_MIN..EQ_FREQUENCY_MAX), a resonance and an extra control
+/* The channel filter (filter.S; eq_model.c publishes it, eq_math.c designs it): a type, the cutoff as
+ * a step on the EQ's log scale (EQ_STEP_*), a resonance and an extra control
  * whose meaning depends on the type, and a source and amount for the cutoff,
- * resonance, extra and type routes as an EQ route's. A zone that follows its
- * channel is all zero, as an EQ zone is, and values compare by memcmp (the
- * record has no padding). */
+ * resonance, extra and type routes as an EQ route's, and on a stereo pair
+ * the Stereo/Right lane's cutoff as steps from this one's, so it follows
+ * it. A zone that follows its channel is all zero, as an EQ zone is, and
+ * values compare by memcmp (the record has no padding). */
 enum { FILTER_OFF, FILTER_LP24, FILTER_LP12, FILTER_BP24, FILTER_BP12, FILTER_HP24, FILTER_HP12,
        FILTER_NOTCH24, FILTER_NOTCH12, FILTER_BAND_STOP, FILTER_DUAL, FILTER_TYPES };
 enum { FILTER_MOD_CUTOFF, FILTER_MOD_RESONANCE, FILTER_MOD_EXTRA, FILTER_MOD_TYPE, FILTER_MOD_COUNT };
@@ -66,7 +77,15 @@ struct filter_value {
     u8 type, resonance, extra, override;
     u16 cutoff;
     signed char source[FILTER_MOD_COUNT], amount[FILTER_MOD_COUNT];
+    s16 right;  /* -EQ_STEP_MAX..EQ_STEP_MAX */
 };
+_Static_assert(sizeof(struct filter_value) == 16, "filter values compare by memcmp: no padding");
+/* Right-side cutoff: cutoff + right, clamped to 0..EQ_STEP_MAX. */
+static inline u32 filter_right_cutoff(const struct filter_value *value)
+{
+    s32 step = (s32)value->cutoff + value->right;
+    return step < 0 ? 0u : step > (s32)EQ_STEP_MAX ? EQ_STEP_MAX : (u32)step;
+}
 /* What Extra sets for a type, or null when the type has none. */
 const char *filter_extra_name(u32 type);
 struct eq_group { s32 mask[4], coefficient[5][5][4]; };
@@ -79,12 +98,12 @@ extern s32 eq_steps[2][5][5][4];
 /* A preset's settings beyond the stock model (preset_extras.c): the live
  * ones, and what each library slot holds. A zone that follows its channel
  * is all zero, so two records compare by memcmp. */
-struct extras { struct eq_value channels[8], zones[8][8]; struct grain_settings grain;
+struct extras { struct eq_value channels[8], zones[8][8]; struct grain_settings grain[8];
                 struct filter_value filters[8], zone_filters[8][8]; };
 extern struct extras patch_live;
 #define eq_channels patch_live.channels
 #define eq_zones patch_live.zones
-#define patch_grain patch_live.grain
+#define patch_grains patch_live.grain
 #define filter_channels patch_live.filters
 #define filter_zones patch_live.zone_filters
 void eq_coefficients(const struct eq_value *value, s32 out[5][5]);
@@ -93,9 +112,18 @@ s32 eq_gain_limit(const struct eq_value *value, u32 band);
 void eq_limit(struct eq_value *value);
 /* A bell step's Q in hundredths. */
 u32 eq_q_hundredths(u32 q);
-u16 eq_frequency(float position);
-float eq_frequency_position(u16 frequency);
-u16 eq_frequency_step(u16 frequency, s32 delta);
+/* A step's frequency in hundredths of a hertz; the step nearest a frequency
+ * in hundredths of a hertz, or a number of cents above EQ_FREQUENCY_MIN; and
+ * a step's place, 0..1, across the graphs' 20 Hz..20 kHz log scale. */
+u32 eq_step_centihertz(u32 step);
+u32 eq_step_nearest(u32 centihertz);
+u32 eq_step_above_min(u32 cents);
+float eq_frequency_position(float hz);
+float eq_step_position(u32 step);
+/* A step as the pages show it, without a unit: tenths of a hertz below
+ * 200 Hz, whole hertz, then kHz to thousandths and above 10 kHz to
+ * hundredths, so each step reads differently. Nonzero when it is in kHz. */
+u32 eq_step_text(char *out, u32 step);
 u16 eq_frequency_shift(u16 frequency, float octaves, u16 low, u16 high);
 void eq_curve(const struct eq_value *value, u32 points, u8 *out, s32 top, s32 bottom);
 void eq_modulate(const struct eq_value *value, u32 channel, struct eq_value *out);
@@ -141,7 +169,6 @@ void filter_curve(const struct filter_value *value, u32 points, u8 *out, s32 top
 void filter_live(const struct filter_value *value, u32 channel, struct filter_value *out);
 u32 filter_modulated(const struct filter_value *value);
 /* A DATA 2 position (0..1 as Q16) on the log scale of frequencies. */
-u16 eq_frequency_from_q16(u32 q16);
 void eq_default(struct eq_value *value);
 void preset_extras_reset(void);
 void preset_extras_foreground(void);

@@ -15,6 +15,7 @@ from patcher import MAX_DOWNLOAD_BYTES, apply_patch, decode_patch, load_layout, 
 
 PATCH_NAME, PAGE_NAME = "assimil8or.a8patch", "assimil8or-patcher.html"
 SCRIPT_MARKER = "<!-- PATCHER_SCRIPT -->"
+VERSION_MARKER = "{{VERSION}}"
 
 
 def main():
@@ -41,17 +42,21 @@ def main():
     template = (web / "patcher.template.html").read_text()
     if template.count(SCRIPT_MARKER) != 1:
         raise ValueError("browser template must contain exactly one script marker")
-    html = template.replace(SCRIPT_MARKER, script)
+    if VERSION_MARKER not in template:
+        raise ValueError("browser template must show the version")
+    version = (ROOT / "VERSION").read_text().strip()
+    html = template.replace(VERSION_MARKER, version).replace(SCRIPT_MARKER, script)
     (ROOT / "patcher.html").write_text(html)
     (dist / PAGE_NAME).write_text(html)
     manifest = {
         "format": 1,
         "firmware": layout["firmware"]["version"],
+        "version": version,
         "build_id": build_id,
         "files": {PATCH_NAME: hashlib.sha256(encoded).hexdigest(), PAGE_NAME: hashlib.sha256(html.encode()).hexdigest()},
     }
     (dist / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"Packaged build {build_id} in {dist}; no Rossum software included")
+    print(f"Packaged version {version}, build {build_id}, in {dist}; no Rossum software included")
 
 
 if __name__ == "__main__":

@@ -37,6 +37,17 @@ struct patch_identity {
     u32 image_crc; /* CRC-32 of the payload with this field zeroed */
 };
 extern const struct patch_identity patch_identity;
+/* Release version, from public/VERSION via make_patch.py: major, minor,
+ * patch, flags. Flag PATCH_VERSION_FLAG_DEV marks a build between releases.
+ * Identify sends the four bytes after the extension state. The About screen
+ * shows patch_version_text. */
+#if !defined(PATCH_VERSION_MAJOR) || !defined(PATCH_VERSION_MINOR) || !defined(PATCH_VERSION_PATCH) || !defined(PATCH_VERSION_DEV)
+#error "build through make_patch.py, which defines PATCH_VERSION_* from VERSION"
+#endif
+#define PATCH_VERSION_FLAG_DEV    0x01u
+#define PATCH_VERSION_BYTES       4u
+extern const u8 patch_version[PATCH_VERSION_BYTES];
+extern const char patch_version_text[];
 
 /* Trial handoff and trampoline in DDR between the stacks above the heap
  * ceiling and the startup tables near 0x9bff0000. No stock code references
@@ -76,16 +87,16 @@ enum { EXTENSION_UNTRIED, EXTENSION_LOADED, EXTENSION_MISSING, EXTENSION_INVALID
 #define AUDIO_STEP_SHIFT          25u
 extern void (*volatile patch_grain_hook)(s32 *mix, const s32 *steps);
 extern s32 patch_grain_steps[AUDIO_CHANNELS], patch_grain_mix[AUDIO_CHANNELS];
-/* Grain mode's settings: its fields in wire order and a CV route for eight
- * of them. They are a preset's (preset_extras.c) and live in the overlay, so
- * a preset keeps them whether or not the extension that plays them is
- * loaded; patch_grain_loaded counts the times other settings replaced them. */
+/* Grain settings, one set per channel: the fields in wire order, and a CV
+ * route for eight of them. They belong to the preset (preset_extras.c) and
+ * live in the overlay, so presets keep them even when the extension is not
+ * loaded. patch_grain_loaded counts loads that replaced them. */
 enum { GRAIN_ON, GRAIN_SIZE, GRAIN_OVERLAP, GRAIN_SPRAY, GRAIN_DETUNE, GRAIN_OCTAVE, GRAIN_REVERSE,
        GRAIN_PAN, GRAIN_SHAPE, GRAIN_SCAN, GRAIN_SLIDE, GRAIN_SKEW, GRAIN_FIELDS };
 enum { GRAIN_ROUTE_SIZE, GRAIN_ROUTE_OVERLAP, GRAIN_ROUTE_SPRAY, GRAIN_ROUTE_DETUNE, GRAIN_ROUTE_SLIDE,
        GRAIN_ROUTE_SCAN, GRAIN_ROUTE_SHAPE, GRAIN_ROUTE_PAN, GRAIN_ROUTES };
 struct grain_settings {
-    s16 value[GRAIN_FIELDS]; /* value[GRAIN_ON]: the channel that plays grains, from 1; 0 off */
+    s16 value[GRAIN_FIELDS]; /* value[GRAIN_ON]: 1 for the one channel that plays grains */
     signed char source[GRAIN_ROUTES], amount[GRAIN_ROUTES]; /* as an EQ route's (eq.h) */
 };
 struct grain_range { s16 low, high, initial; };
