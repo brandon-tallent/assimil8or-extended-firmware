@@ -6,6 +6,16 @@ and under **Utilities > About this Module**.
 
 ## Unreleased
 
+## 1.0.1 — 2026-10-25
+
+### Changed
+
+- EQ starts Off on every channel; turn it On on the EQ page. A preset saved
+  with a channel's EQ untouched now opens with it Off, and 1.0.0 opens
+  one saved here with it On; both sound the same, as the EQ is flat.
+- The Filter page cursor moves across each row, then down, like the other
+  pages.
+
 ## 1.0.0 — 2026-10-21
 
 ### New

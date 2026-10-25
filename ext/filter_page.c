@@ -45,7 +45,6 @@ int sprintf(char *buffer, const char *format, ...);
 #define LEVEL_COARSE          10
 #define AMOUNT_COARSE         10
 
-/* Cursor order: for each setting, its value, CV source and CV amount; then EDIT. */
 enum { SETTING_TYPE, SETTING_CUTOFF, SETTING_RESONANCE, SETTING_EXTRA, SETTINGS };
 enum { PART_VALUE, PART_SOURCE, PART_AMOUNT, PARTS };
 #define FIELD_EDIT (SETTINGS*PARTS)
@@ -61,6 +60,18 @@ static const struct {
     {CV_COLUMN_X, SECTION_1_Y, FILTER_MOD_CUTOFF, "CUTOFF", "Cutoff", "oct", FILTER_CUTOFF_OCTAVES_PER_VOLT},
     {LEFT_X, SECTION_2_Y, FILTER_MOD_RESONANCE, "RES", "Resonance", "steps", FILTER_STEPS_PER_VOLT},
     {CV_COLUMN_X, SECTION_2_Y, FILTER_MOD_EXTRA, "EXTRA", "Extra", "steps", FILTER_STEPS_PER_VOLT},
+};
+/* Cursor order: across each row, then down: the two values, then their CV
+ * sources and amounts; EDIT last, so the page opens on Type. */
+#define FIELD(setting, part) ((setting)*PARTS + (part))
+static const u8 cursor_order[FIELD_COUNT] = {
+    FIELD(SETTING_TYPE, PART_VALUE), FIELD(SETTING_CUTOFF, PART_VALUE),
+    FIELD(SETTING_TYPE, PART_SOURCE), FIELD(SETTING_TYPE, PART_AMOUNT),
+    FIELD(SETTING_CUTOFF, PART_SOURCE), FIELD(SETTING_CUTOFF, PART_AMOUNT),
+    FIELD(SETTING_RESONANCE, PART_VALUE), FIELD(SETTING_EXTRA, PART_VALUE),
+    FIELD(SETTING_RESONANCE, PART_SOURCE), FIELD(SETTING_RESONANCE, PART_AMOUNT),
+    FIELD(SETTING_EXTRA, PART_SOURCE), FIELD(SETTING_EXTRA, PART_AMOUNT),
+    FIELD_EDIT,
 };
 static u32 setting_of(u32 field) { return field / PARTS; }
 static u32 part_of(u32 field) { return field % PARTS; }
@@ -95,8 +106,8 @@ static u32 count(u32 channel)
 static u32 field_of(u32 channel, u32 cursor)
 {
     u32 type = value(channel)->type;
-    for (u32 f = 0; f < FIELD_COUNT; ++f)
-        if (shown(type, f) && !cursor--) return f;
+    for (u32 n = 0; n < FIELD_COUNT; ++n)
+        if (shown(type, cursor_order[n]) && !cursor--) return cursor_order[n];
     return FIELD_EDIT;
 }
 static void apply(u32 channel, struct filter_value next)

@@ -24,7 +24,6 @@ static u32 initialized, force, cv_moved, cv_sampled_at;
 void eq_default(struct eq_value *value)
 {
     memset(value, 0, sizeof(*value));
-    value->on = 1;
     value->frequency[0] = EQ_STEP_150HZ;
     value->frequency[1] = EQ_STEP_1K;
     value->frequency[2] = EQ_STEP_10K;
