@@ -23,9 +23,10 @@ struct panel_page {
      * when it drew. Called at the EQ graph's live rate, or null. */
     u32 (*live)(u32 channel);
 };
-/* The pages Phase Mod steps to from its own page, and those Envelope steps to. */
+/* The pages Phase Mod, Envelope and Pitch step to from their own pages. */
 extern const struct panel_page *volatile patch_panel_page;
 extern const struct panel_page *volatile patch_envelope_page;
+extern const struct panel_page *volatile patch_pitch_page;
 /* The EDIT scope the EQ pages share: editing a zone's settings (nonzero) or the channel's. */
 u32 panel_scope_zone(void);
 u32 panel_selected_zone(void);

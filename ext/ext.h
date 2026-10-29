@@ -19,6 +19,7 @@ typedef signed long long s64;
 #define PRESET_CHANNEL_BYTES      0x2c8u
 #define PRESET_CHANNELS           8u
 #define PRESET_RECORD_BYTES       (PRESET_CHANNELS_OFFSET + PRESET_CHANNELS * PRESET_CHANNEL_BYTES)
+#define PRESET_LIBRARY_BASE       0x80116bccu /* record N at + N * PRESET_RECORD_BYTES */
 #define PRESET_LIBRARY_FIRST      1u
 #define PRESET_LIBRARY_LAST       199u
 #define ZONES                     8u
@@ -51,7 +52,8 @@ typedef signed long long s64;
 
 /* Runtime sample objects (SAMPLE_OBJECT_*): 32-bit frames per channel
  * buffer after a zeroed leading guard. */
-#define SAMPLE_PATH               0x30u /* after the 48-byte short name */
+#define SAMPLE_NAME_BYTES         0x30u /* the short name, at the object's start */
+#define SAMPLE_PATH               SAMPLE_NAME_BYTES
 #define SAMPLE_PATH_BYTES         128u
 #define SAMPLE_FRAMES             0xb0u
 #define SAMPLE_RATE               0xb4u
@@ -238,7 +240,34 @@ void grains_foreground(void);
 void grains_init(void);
 void filter_record(u32 index, u8 *out);
 void filter_page_init(void);
+void timelock_page_init(void); /* timelock_page.c: the Time Lock page, after Pitch */
 void filter_page_foreground(void);
+
+/* hits.c: Time Lock's hit detector, one job at a time, in steps, in the
+ * foreground. A position is a sample frame. */
+#define HIT_FLAG                  0x80000000u /* the position starts a slice; the others are rises */
+void hits_begin(const s32 *left, const s32 *right, u32 frames, u32 rate);
+int hits_step(void);
+u32 hits_take(u32 *out, u32 room, u32 *analysed);
+/* slice_maps.c: each played sample's hits, found in the foreground; a
+ * sample's positions once they are ready, else null. */
+void slice_maps_foreground(void);
+const u32 *slice_map_find(const u8 *sample, u32 *count, u32 *analysed);
+/* timelock.c: Time Lock playback, from the audio hook. */
+void timelock_frame(s32 *mix, const s32 *steps);
+void timelock_foreground(void);
+void timelock_init(void);
+int timelock_active(void);
+int timelock_wanted(u32 channel);
+/* A channel's tempo for a zone, as the Time Lock page shows it: the
+ * zone's Beats (guessed when Auto), the loop's own tempo, the tempo it plays
+ * at (0 when a clock is not running), all BPM in tenths; whether it follows a
+ * clock. */
+struct timelock_tempo { u32 beats, own_bpm10, bpm10; u8 guessed, clock_live, clocked; };
+void timelock_tempo(u32 channel, u32 zone, struct timelock_tempo *out);
+u32 timelock_guess(const u8 *sample, u32 span, u32 rate);
+u32 timelock_set(u32 channel, u32 zone, u32 field, s32 value, u8 *out, u32 *count);
+u32 grain_playing_channel(void); /* grains.c: PRESET_CHANNELS and above when off */
 
 /* resample.c: a channel's output recorded into one of its zones. */
 u32 resample_arm(u32 channel, u32 zone, u32 value, u32 sequence, u8 *out, u32 *count);

@@ -40,7 +40,11 @@ def version_flags() -> list[str]:
 
 
 # Sources that use the VFP in the foreground; everything else must leave it alone.
+# NEON sources also use NEON, built for speed (the audio interrupt saves
+# every NEON register).
 FLOAT_SOURCES = ("eq_math", "eq_model", "eq_panel")
+NEON_SOURCES = ("hits", "joins")
+IRQ_SOURCES = ("timelock",)  # the audio interrupt's work, built for speed
 SPLICE_INSERT_SECTION = ".splice.{name}"
 
 
@@ -69,8 +73,12 @@ def branch(address: int, target: int, instruction: str) -> bytes:
 
 def compile_source(prefix: str, source: Path, build: Path, include: Path) -> str:
     obj = build / (source.stem + ".o")
-    fp_flags = ["-mfloat-abi=softfp", "-mfpu=vfpv3"] if source.stem in FLOAT_SOURCES else ["-mfloat-abi=soft", "-mgeneral-regs-only"]
-    subprocess.run([prefix + "gcc", "-c", "-std=c11", "-Os", "-g",
+    fp_flags = (["-mfloat-abi=softfp", "-mfpu=neon"] if source.stem in NEON_SOURCES else
+                ["-mfloat-abi=softfp", "-mfpu=vfpv3"] if source.stem in FLOAT_SOURCES else
+                ["-mfloat-abi=soft", "-mgeneral-regs-only"])
+    optimise = (["-O3", "-funroll-loops"] if source.stem in NEON_SOURCES else
+                ["-O2"] if source.stem in IRQ_SOURCES else ["-Os"])
+    subprocess.run([prefix + "gcc", "-c", "-std=c11", *optimise, "-g",
                     "-mcpu=cortex-a8", "-marm", *fp_flags,
                     "-ffreestanding", "-fno-builtin", "-fno-common", "-fno-unwind-tables",
                     "-fno-asynchronous-unwind-tables", "-Wall", "-Wextra", "-Werror", *version_flags(),

@@ -10,6 +10,7 @@ void midi_handle_pitch_bend(void *, const u8 *);
 void stock_cv_transmit(void *);
 void stock_program_transmit(void *, u32);
 
+volatile u32 patch_midi_clock_ticks;
 static u8 rx_frame[64];
 static u32 rx_size, rx_active, rx_discard, rx_ready, rx_skip;
 #define TX_BYTES 2048u
@@ -73,7 +74,7 @@ void patch_rx_poll(void *receiver)
         if (incoming < 0) break;
         u8 byte = (u8)incoming;
         counters.rx_bytes++;
-        if (byte >= MIDI_REALTIME_FIRST) continue;
+        if (byte >= MIDI_REALTIME_FIRST) { patch_midi_clock_ticks += byte == MIDI_CLOCK; continue; }
         if (byte == MIDI_SYSEX_START) {
             if (rx_active) counters.rx_sysex_rejects++;
             rx_active = 1; rx_size = rx_discard = rx_skip = 0;

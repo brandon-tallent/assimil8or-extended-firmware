@@ -277,6 +277,7 @@ loads and sample jobs. While one runs, another replies Busy.
 | u32 | Checksum of the channel and zone EQ |
 | u32 | Checksum of the grain settings |
 | u32 | Checksum of the channel and zone filters |
+| 8 × u8 | Each channel's Time Lock: 0 Off, 1 On |
 
 Poll this to follow the module. When a checksum changes, read that part
 again. The three last checksums change when the settings do; they are not
@@ -393,6 +394,13 @@ Set parameter's IDs. The zone byte matters only where noted.
 | 48 | Channel mode | 0 Master, 1 Link, 2 Stereo/Right, 3 Cycle |
 | 49, 50 | Mix level modulation source, amount | as above |
 | 51 | Mute/Solo | 0 normal, 1 mute, 2 solo (not saved with the preset) |
+| 52 | Time Lock | 0 Off, 1 On; the zone byte is ignored |
+| 53 | Time Lock counters | replies eight u32: joins, joins skipped, slice starts, fill pieces, run-outs, resyncs, planned joins, fill joins that waited; then the zone's tempo: u32 Beats, u32 the loop's own BPM ×10, u32 the BPM it plays at ×10 (0: no clock), u8 Beats is Auto, u8 the clock runs, u8 it follows a clock |
+| 54 | Time Lock tempo | 0 channel 1's (on channel 1, Own), 1 Own, 2 Speed, 3 MIDI clock, 4 CV clock |
+| 55 | Time Lock Speed | 0.1% from 100%: −750…3000 |
+| 56 | Time Lock clock input | the CV clock's source, −4…23 |
+| 57 | Time Lock clock pulses | a beat, 0 (4)…96 |
+| 58 | Time Lock Beats | zone byte 0–7: the loop's length in beats, 0 Auto…128 |
 
 The sixteen modulations, n = 0…15: linear FM, exponential FM, pitch CV,
 phase CV, phase mod index, bits, aliasing, linear AM, exponential AM,

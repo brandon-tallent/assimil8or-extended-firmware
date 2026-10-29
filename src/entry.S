@@ -289,10 +289,12 @@ trampoline_end:
 .endm
 .global phase_knob_hook, phase_entry_stock, phase_render_stock
 .global envelope_knob_hook, envelope_entry_stock, envelope_render_stock
+.global pitch_knob_hook, pitch_entry_stock, pitch_render_stock
 .equ ZONE_EDITOR_PLAYBACK_PARAMETER_SELECTOR, 0xfc
 KNOB_HOOK eq_knob_hook, zone_editor_bit_parameter_set_normalized, ldr r3, [r0, #ZONE_EDITOR_BIT_PARAMETER_SELECTOR]
 KNOB_HOOK phase_knob_hook, zone_editor_phase_modulation_parameter_set_normalized, ldr r2, [r0, #ZONE_EDITOR_PHASE_MODULATION_PARAMETER_SELECTOR]
 KNOB_HOOK envelope_knob_hook, zone_editor_playback_parameter_set_normalized, ldr r1, [r0, #ZONE_EDITOR_PLAYBACK_PARAMETER_SELECTOR]
+KNOB_HOOK pitch_knob_hook, zone_editor_pitch_parameter_set_normalized, push {r3-r11, lr}
 .equ EDITOR_SELECTOR_PAGE_STATE, 0x58
  phase_entry_stock:
     ldr r3, [r0, #EDITOR_SELECTOR_PAGE_STATE]
@@ -306,6 +308,12 @@ KNOB_HOOK envelope_knob_hook, zone_editor_playback_parameter_set_normalized, ldr
  envelope_render_stock:
     push {r4-r11, lr}
     b ui_render_channel_envelope_and_playback_page + 4
+ pitch_entry_stock:
+    ldr r3, [r0, #EDITOR_SELECTOR_PAGE_STATE]
+    b zone_editor_pitch_control_primary_callback + 4
+ pitch_render_stock:
+    push {r4-r10, lr}
+    b ui_render_channel_pitch_and_modulation_page + 4
  eq_channel_select_hook:
     push {r4, lr}
     bl eq_channel_select_stock

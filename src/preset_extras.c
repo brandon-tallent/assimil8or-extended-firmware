@@ -30,6 +30,13 @@
  *   Grain<c> : on size overlap spray detune octave reverse pan shape scan
  *     slide skew. on is 1 for the channel that plays grains.
  *   GrainCV<c> : source amount for each grain route
+ *   TimeLock<c> : on [tempo speed input ppqn]. on is 1 when on. The rest,
+ *     written when any is set: tempo 0 channel 1's (on channel 1, Own), 1 Own,
+ *     2 Speed, 3 MIDI clock, 4 CV clock;
+ *     speed in tenths of a percent from 100%; the clock's CV input selector
+ *     (-4 none); the clock's pulses a beat (0: 4).
+ *   TimeLock<c>Z<z> : beats. The zone's loop length in beats, written when
+ *     set (0: guessed).
  * Format 1 grain lines, read into all eight channels:
  *   Grain : channel size overlap ... skew (channel 0: none plays)
  *   GrainCV : source amount for each grain route
@@ -58,9 +65,11 @@
 #define NO_DECIMALS               0u
 #define CENTS_PER_UNIT            100       /* hundredths: a frequency's decimals */
 #define CENTS_PER_STEP            10        /* a cutoff step, 1/120 octave */
-#define EXTRAS_FORMAT             2         /* per-channel grain, frequencies as steps, FILTR */
+#define EXTRAS_FORMAT             3         /* per-channel grain, frequencies as steps, FILTR, TimeLock */
 #define LINE_BYTES                112u
 #define KEY_BYTES                 12u
+#define TIME_LOCK_NUMBERS         5u        /* on tempo speed input ppqn */
+#define TIME_LOCK_ZONE_NUMBERS    1u        /* beats */
 
 u32 extras_parse_file_stock(u32 model, void *file);
 u32 extras_parse_field_stock(u32 *state, const char *line);
@@ -237,6 +246,26 @@ static const char *hundredths(const char *s, s32 *out)
 static void line(u32 model, const char *s)
 {
     while (*s == ' ' || *s == '\t') ++s;
+    if (!strncasecmp(s, "TimeLock", 8)) {
+        s += 8;
+        u32 channel = (u32)(*s++ - '1'), zone = NO_ZONE;
+        if (channel >= CHANNELS) return;
+        if (*s == 'Z' || *s == 'z') { zone = (u32)(s[1] - '1'); s += 2; if (zone >= ZONES) return; }
+        /* The numbers after the first are optional; absent ones are the defaults. */
+        s32 n[TIME_LOCK_NUMBERS] = {0, 0, 0, EQ_CV_SOURCE_OFF, 0}, more;
+        u32 count = 0, wanted = zone == NO_ZONE ? TIME_LOCK_NUMBERS : TIME_LOCK_ZONE_NUMBERS;
+        for (const char *next; count < wanted && (next = number(s, &n[count])); s = next) ++count;
+        struct extras *e = destination(model);
+        if (!count || number(s, &more) || !e) return;
+        if (zone == NO_ZONE) {
+            e->time_lock[channel] = n[0] != 0;
+            e->tempo[channel] = (u8)clamp(n[1], 0, TIME_LOCK_TEMPOS - 1);
+            e->tempo_speed[channel] = (s16)clamp(n[2], TIME_LOCK_SPEED_MIN, TIME_LOCK_SPEED_MAX);
+            e->tempo_input[channel] = (u8)(clamp(n[3], EQ_CV_SOURCE_OFF, EQ_CV_SOURCE_MAX) - EQ_CV_SOURCE_OFF);
+            e->tempo_ppqn[channel] = (u8)clamp(n[4], 0, TIME_LOCK_PPQN_MAX);
+        } else e->beats[channel][zone] = (u8)clamp(n[0], 0, TIME_LOCK_BEATS_MAX);
+        return;
+    }
     u32 grain = !strncasecmp(s, "Grain", 5), filter = !strncasecmp(s, "FILT", 4);
     if (!grain && !filter && strncasecmp(s, "EQ", 2)) return;
     s += grain ? 5 : filter ? 4 : 2;
@@ -389,6 +418,19 @@ static void append(const char *path, const struct extras *e)
             if (differs) write_line(&file, key, n, GRAIN_FIELDS, NO_DECIMALS);
             sprintf(key, "GrainCV%d", ch + 1);
             if (get_routes(g->source, g->amount, n, GRAIN_ROUTES)) write_line(&file, key, n, 2*GRAIN_ROUTES, NO_DECIMALS);
+        }
+        for (u32 ch = 0; ch < CHANNELS; ++ch) {
+            char key[KEY_BYTES];
+            n[0] = e->time_lock[ch]; n[1] = e->tempo[ch]; n[2] = e->tempo_speed[ch];
+            n[3] = e->tempo_input[ch] + EQ_CV_SOURCE_OFF; n[4] = e->tempo_ppqn[ch];
+            u32 tempo = n[1] || n[2] || e->tempo_input[ch] || n[4];
+            sprintf(key, "TimeLock%d", ch + 1);
+            if (n[0] || tempo) write_line(&file, key, n, tempo ? TIME_LOCK_NUMBERS : 1, NO_DECIMALS);
+            for (u32 z = 0; z < ZONES; ++z) {
+                if (!(n[0] = e->beats[ch][z])) continue;
+                sprintf(key, "TimeLock%dZ%d", ch + 1, z + 1);
+                write_line(&file, key, n, TIME_LOCK_ZONE_NUMBERS, NO_DECIMALS);
+            }
         }
     }
     resource_close(&file);

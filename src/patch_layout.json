@@ -128,6 +128,24 @@
    "site": "zone_editor_playback_parameter_set_normalized"
   },
   {
+   "address": "0x80015e44",
+   "instruction": "b",
+   "target": "pitch_panel_entry",
+   "site": "zone_editor_pitch_control_primary_callback"
+  },
+  {
+   "address": "0x8001eff0",
+   "instruction": "b",
+   "target": "pitch_panel_render",
+   "site": "ui_render_channel_pitch_and_modulation_page"
+  },
+  {
+   "address": "0x800326d0",
+   "instruction": "b",
+   "target": "pitch_knob_hook",
+   "site": "zone_editor_pitch_parameter_set_normalized"
+  },
+  {
    "address": "0x800565ec",
    "instruction": "b",
    "target": "preset_extras_parse_file",

@@ -25,10 +25,10 @@ static struct {
     volatile u32 command;
     u32 sequence, bytes, started;
     u8 payload[REQUEST_MAX];
-    u32 saving;
+    u32 saving, save_index;
 } job;
 
-static void init(void) { memset(&job, 0, sizeof(job)); folder_init(); stream_init(); audition_init(); grains_init(); filter_page_init(); resample_init(); }
+static void init(void) { memset(&job, 0, sizeof(job)); folder_init(); stream_init(); audition_init(); grains_init(); filter_page_init(); timelock_page_init(); resample_init(); timelock_init(); }
 static int busy(void) { return job.command != 0; }
 
 /* EDIT_SET with this sequence, which no request uses, is automation. */
@@ -77,6 +77,8 @@ struct parameter { u16 offset; u8 bytes, zone; s32 low, high; };
 #define SET_MIX_MOD_SOURCE 49u
 #define SET_MIX_MOD_AMOUNT 50u
 #define SET_MIX_STATE 51u
+#define SET_TIME_LOCK 52u        /* timelock.c: on/off, its counters, tempo, Speed, clock input and pulses, Beats */
+#define SET_TIME_LOCK_LAST 58u
 #define ZONE_FIRST 64u
 /* Channel/zone EQ: the zone byte names a zone, or EQ_SLOT_CHANNEL. A zone
  * that follows its channel copies the channel EQ on its first edit, as the
@@ -285,6 +287,8 @@ static u32 set_parameter(const u8 *p, u8 *out, u32 *count)
     if (p[2] >= SET_GRAIN_FIRST + GRAIN_SET_SLIDE) return grain_set(channel, p[2] - SET_GRAIN_FIRST, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_RESAMPLE_FIRST) return resample_set(channel, zone, p[2] - SET_RESAMPLE_FIRST, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_GRAIN_FIRST) return grain_set(channel, p[2] - SET_GRAIN_FIRST, (s32)get_u32(p + 3), out, count);
+    if (p[2] >= SET_TIME_LOCK && p[2] <= SET_TIME_LOCK_LAST)
+        return timelock_set(channel, zone, p[2] - SET_TIME_LOCK, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_FILTER_FIRST && p[2] < SET_FILTER_FIRST + SET_FILTER_IDS) {
         s32 stored;
         u32 status = set_filter(channel, zone, p[2] - SET_FILTER_FIRST, (s32)get_u32(p + 3), &stored);
@@ -636,7 +640,10 @@ static u32 summary(u8 *out, u32 *count)
     put_u32(out + at + n + 5, grain_crc());
     crc = crc32_update(~0u, filter_channels, sizeof(filter_channels));
     put_u32(out + at + n + 9, ~crc32_update(crc, filter_zones, sizeof(filter_zones)));
-    *count = at + n + 13;
+    /* Each channel's Time Lock. */
+    at += n + 13;
+    for (u32 c = 0; c < PRESET_CHANNELS; ++c) out[at++] = time_lock_channels[c];
+    *count = at;
     return OK;
 }
 
@@ -660,13 +667,40 @@ u32 sample_info(const u8 *p, u8 *out, u32 *count)
 /* Save: first the files of samples chosen in other folders are copied into
  * the active folder, a part each pass, as the stock Save does before it
  * writes. Then the stock transaction: the library record is replaced at
- * once and the sample service writes prstNNN.yml. */
-static u32 save_index(const u8 *p) { return p[0] ? p[0] : REG32(WORKING_PRESET_STATE); }
-static u32 save_start(const u8 *p)
+ * once and the sample service writes prstNNN.yml.
+ * A name after the index saves under that name: to the library preset of
+ * that name, else to the first empty one, which becomes the working preset. */
+static const u8 *library_record(u32 index) { return (const u8 *)PRESET_LIBRARY_BASE + index * PRESET_RECORD_BYTES; }
+static int library_empty(u32 index)
 {
-    u32 index = save_index(p);
+    for (u32 channel = 0; channel < PRESET_CHANNELS; ++channel)
+        if (library_record(index)[PRESET_CHANNELS_OFFSET + channel * PRESET_CHANNEL_BYTES]) return 0;
+    return 1;
+}
+static u32 named_index(const u8 name[PRESET_NAME_BYTES])
+{
+    u32 empty = 0;
+    for (u32 index = PRESET_LIBRARY_FIRST; index <= PRESET_LIBRARY_LAST; ++index) {
+        if (!strncasecmp((const char *)library_record(index), (const char *)name, PRESET_NAME_BYTES)) return index;
+        if (!empty && library_empty(index)) empty = index;
+    }
+    return empty;
+}
+static u32 save_start(const u8 *p, u32 bytes)
+{
+    u8 name[PRESET_NAME_BYTES];
+    u32 index = p[0] ? p[0] : REG32(WORKING_PRESET_STATE);
+    if (bytes > 1) {
+        /* Library names are padded with spaces. */
+        memset(name, ' ', sizeof(name));
+        memcpy(name, p + 1, bytes - 1);
+        index = named_index(name);
+    }
     if (index < PRESET_LIBRARY_FIRST || index > PRESET_LIBRARY_LAST) return BAD_RANGE;
-    return stock_busy() ? BUSY : OK;
+    if (stock_busy()) return BUSY;
+    if (bytes > 1) { memcpy((void *)PRESET_MODEL, name, sizeof(name)); REG32(WORKING_PRESET_STATE) = index; }
+    job.save_index = index;
+    return OK;
 }
 
 static u32 expected_bytes(u32 command, u32 bytes)
@@ -680,7 +714,7 @@ static u32 expected_bytes(u32 command, u32 bytes)
     case EDIT_FOLDER: return bytes >= 2 ? bytes : 2;
     case EDIT_PEAKS: return 11;
     case EDIT_TRANSIENTS: return 3;
-    case EDIT_SAVE: return 1;
+    case EDIT_SAVE: return bytes >= 1 && bytes <= 1 + PRESET_NAME_BYTES ? bytes : 1;
     case EDIT_ASSIGN: return bytes >= 2 ? bytes : 2;
     case EDIT_EXPLODE: return bytes >= 3 ? bytes : 3;
     case EDIT_FILE_PEAKS: return bytes >= 10 ? bytes : 10;
@@ -696,6 +730,8 @@ static void foreground(void)
     audition_foreground();
     resample_foreground();
     filter_page_foreground();
+    slice_maps_foreground();
+    timelock_foreground();
     u32 command = job.command;
     if (!command) { automate_foreground(); return; }
     u8 out[REPLY_BYTES - 1]; u32 count = 0, status = OK;
@@ -704,7 +740,7 @@ static void foreground(void)
         /* Storage stays claimed from the request until the files are in. */
         status = externals_copy_step();
         if (status == COPY_MORE) return;
-        if (status == OK) preset_save_library_index_schedule_yaml_write((void *)WORKING_PRESET_STATE, save_index(p), 0);
+        if (status == OK) preset_save_library_index_schedule_yaml_write((void *)WORKING_PRESET_STATE, job.save_index, 0);
         storage_release();
         job.saving = status == OK ? SAVE_WRITING : SAVE_IDLE; job.started = REG32(TICKS);
         if (status == OK) return;
@@ -718,7 +754,7 @@ static void foreground(void)
         } else {
             status = BYTE(SAMPLE_SERVICE_RESULT_ADDR) ? IO_ERROR : OK;
             out[0] = (u8)REG32(WORKING_PRESET_STATE); count = 1;
-            if (status == OK && (!p[0] || p[0] == out[0])) resample_saved();
+            if (status == OK && job.save_index == out[0]) resample_saved();
         }
         job.saving = SAVE_IDLE;
         goto done;
@@ -768,7 +804,7 @@ static void foreground(void)
     case EDIT_EXPLODE: status = explode(p, job.bytes); break;
     case EDIT_FILE_PEAKS: status = file_peaks(p, job.bytes, out, &count); break;
     case EDIT_SAVE:
-        status = save_start(p);
+        status = save_start(p, job.bytes);
         if (status == OK) { job.saving = SAVE_COPYING; return; }
         break;
     default: status = BAD_COMMAND; break;

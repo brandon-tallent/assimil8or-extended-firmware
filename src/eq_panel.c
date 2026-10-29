@@ -13,6 +13,8 @@ void phase_panel_entry(u32 *context, u32 argument);
 void envelope_entry_stock(u32 *context, u32 argument);
 void envelope_render_stock(u32 *task);
 void envelope_panel_entry(u32 *context, u32 argument);
+void pitch_entry_stock(u32 *context, u32 argument);
+void pitch_render_stock(u32 *task);
 void eq_value_bar(u32 object, s32 x, s32 y, u32 value_bits); /* entry.S: float in s0 */
 char *ui_format_cv_input_selector(char *dest, const signed short *selector, s32 channel);
 static char *format_source(char *dest, s32 source)
@@ -30,10 +32,12 @@ int sprintf(char *buffer, const char *format, ...);
 #define ZONE_EDITOR_SELECTED_ZONE 0x60u
 #define BITS_PAGE_STATE 12u                 /* ZONE_EDITOR_BIT_PAGE_STATE */
 #define PHASE_PAGE_STATE 15u                /* ZONE_OPERATION_PANEL_PAGE_STATE */
+#define PITCH_PAGE_STATE 9u                 /* ZONE_EDITOR_PITCH_PAGE_STATE */
 /* Front-panel records and callback slots (FRONT_PANEL_RECORD_*). */
 #define PANEL_SAMPLE 12u                    /* FRONT_PANEL_SAMPLE_BUTTON_RECORD_INDEX */
 #define PANEL_PRESS 0x00u
 #define PANEL_PHASE_MOD 17u                 /* FRONT_PANEL_BINDING_PHASE_MODE_RECORD */
+#define PANEL_PITCH 15u                     /* the Pitch button's front-panel record */
 #define PANEL_MUTATE 18u
 #define PANEL_ENVELOPE 25u                  /* FRONT_PANEL_ENVELOPE_RECORD_INDEX */
 #define PANEL_DOUBLE 0x20u                  /* FRONT_PANEL_RECORD_DOUBLE_CALLBACK */
@@ -84,8 +88,9 @@ int sprintf(char *buffer, const char *format, ...);
 #define AMOUNT_COARSE 10
 
 /* PAGE_EXTRA and above are the extension's pages, in list order: those Phase
- * Mod steps to, then from PAGE_ENVELOPE those Envelope steps to. */
-enum { PAGE_NONE, PAGE_EQ, PAGE_CV, PAGE_EXTRA, PAGE_ENVELOPE = 64 };
+ * Mod steps to, from PAGE_ENVELOPE those Envelope steps to, and from
+ * PAGE_PITCH those Pitch steps to. */
+enum { PAGE_NONE, PAGE_EQ, PAGE_CV, PAGE_EXTRA, PAGE_ENVELOPE = 64, PAGE_PITCH = 128 };
 enum { FIELD_LOW_FREQUENCY, FIELD_MID_FREQUENCY, FIELD_HIGH_FREQUENCY,
        FIELD_LOW_GAIN, FIELD_MID_GAIN, FIELD_HIGH_GAIN, FIELD_LOW_Q, FIELD_MID_Q, FIELD_HIGH_Q,
        FIELD_HPF, FIELD_ON, FIELD_SCOPE, EQ_FIELD_COUNT };
@@ -104,8 +109,9 @@ u32 eq_panel_active(void) { return page != PAGE_NONE && editor(EDITOR_SELECTOR_P
 /* The extension's page being shown, or null: none shown, or the extension left. */
 static const struct panel_page *extra(void)
 {
-    u32 first = page >= PAGE_ENVELOPE ? PAGE_ENVELOPE : PAGE_EXTRA;
-    const struct panel_page *shown = page < PAGE_EXTRA ? 0 : page >= PAGE_ENVELOPE ? patch_envelope_page : patch_panel_page;
+    u32 first = page >= PAGE_PITCH ? PAGE_PITCH : page >= PAGE_ENVELOPE ? PAGE_ENVELOPE : PAGE_EXTRA;
+    const struct panel_page *shown = page < PAGE_EXTRA ? 0 : page >= PAGE_PITCH ? patch_pitch_page :
+                                     page >= PAGE_ENVELOPE ? patch_envelope_page : patch_panel_page;
     for (u32 n = first; shown && n < page; ++n) shown = shown->next;
     return shown;
 }
@@ -185,6 +191,28 @@ void envelope_panel_entry(u32 *context, u32 argument)
     if (patch_envelope_page) {
         bind(PANEL_ENVELOPE, PANEL_SHORT_RELEASE, envelope_panel_step);
         bind(PANEL_ENVELOPE, PANEL_DOUBLE, 0);
+    }
+}
+/* Pitch pressed on its own page or one of the extension's: the next page,
+ * and after the last the Pitch page again. From any other page it is the
+ * stock Pitch page. */
+void pitch_panel_entry(u32 *context, u32 argument);
+static void pitch_panel_step(u32 *context, u32 argument)
+{
+    u32 here = editor(EDITOR_SELECTOR_PAGE_STATE) == PITCH_PAGE_STATE;
+    page = eq_panel_active() && page >= PAGE_PITCH ? page + 1 : PAGE_PITCH;
+    if (here && extra()) show(page); else pitch_panel_entry(context, argument);
+}
+/* In place of the stock Pitch page entry: with the extension's pages to
+ * show, a second press steps to them. A Stereo/Right channel keeps the stock
+ * notice. */
+void pitch_panel_entry(u32 *context, u32 argument)
+{
+    pitch_entry_stock(context, argument);
+    leave();
+    if (patch_pitch_page && editor(EDITOR_SELECTOR_PAGE_STATE) == PITCH_PAGE_STATE) {
+        bind(PANEL_PITCH, PANEL_SHORT_RELEASE, pitch_panel_step);
+        bind(PANEL_PITCH, PANEL_DOUBLE, 0);
     }
 }
 static void apply_value(struct eq_value *next);
@@ -703,6 +731,11 @@ void envelope_panel_render(u32 *task)
 {
     if (eq_panel_active() && !extra()) leave();
     if (eq_panel_active()) render(task); else envelope_render_stock(task);
+}
+void pitch_panel_render(u32 *task)
+{
+    if (eq_panel_active() && !extra()) leave();
+    if (eq_panel_active()) render(task); else pitch_render_stock(task);
 }
 void phase_panel_render(u32 *task)
 {

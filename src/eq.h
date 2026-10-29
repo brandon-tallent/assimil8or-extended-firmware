@@ -44,6 +44,10 @@
 /* Modulation routes, in CV page order. */
 enum { EQ_MOD_LOW_FREQUENCY, EQ_MOD_LOW_GAIN, EQ_MOD_MID_FREQUENCY, EQ_MOD_MID_GAIN,
        EQ_MOD_HIGH_FREQUENCY, EQ_MOD_HIGH_GAIN, EQ_MOD_HPF, EQ_MOD_COUNT };
+/* Calibrated CV inputs: 24 signed halfwords, three rows (A/B/C) of eight
+ * (ENGINE_CALIBRATION_CV_SAMPLE_BASE); 32768 is 5 V. */
+#define EQ_CV_SAMPLES 0x9ffffe50u
+#define EQ_CV_INPUTS 24u
 #define EQ_CV_SOURCE_OFF -4          /* CV_INPUT_SOURCE_OFF */
 #define EQ_CV_SOURCE_RELATIVE_FIRST -3 /* CV A..CV C: the channel's own inputs */
 #define EQ_CV_SOURCE_MAX 23          /* 1A..8C */
@@ -98,14 +102,36 @@ extern s32 eq_steps[2][5][5][4];
 /* A preset's settings beyond the stock model (preset_extras.c): the live
  * ones, and what each library slot holds. A zone that follows its channel
  * is all zero, so two records compare by memcmp. */
+/* Time Lock: a channel's is 0 off, 1 on. Its tempo, per channel: the source
+ * (TIME_LOCK_TEMPO_*), Speed in tenths of a percent from 100%, the clock's CV
+ * input as its selector minus EQ_CV_SOURCE_OFF (0: none), and the clock's
+ * pulses a beat (0: TIME_LOCK_PPQN_DEFAULT). Per zone, the loop's length in
+ * beats (0: guessed). Zero is the default throughout. */
+/* TIME_LOCK_TEMPO_CHANNEL_1: channel 1's tempo, its clock included; on channel 1, Own. */
+enum { TIME_LOCK_TEMPO_CHANNEL_1, TIME_LOCK_TEMPO_OWN, TIME_LOCK_TEMPO_SPEED, TIME_LOCK_TEMPO_MIDI, TIME_LOCK_TEMPO_CV,
+       TIME_LOCK_TEMPOS };
+#define TIME_LOCK_PPQN_DEFAULT 4u
+#define TIME_LOCK_PPQN_MAX 96
+#define TIME_LOCK_SPEED_MIN (-750)   /* 25% */
+#define TIME_LOCK_SPEED_MAX 3000     /* 400% */
+#define TIME_LOCK_SPEED_UNITY 1000   /* 100%, in tenths of a percent */
+#define TIME_LOCK_BEATS_MAX 128u
 struct extras { struct eq_value channels[8], zones[8][8]; struct grain_settings grain[8];
-                struct filter_value filters[8], zone_filters[8][8]; };
+                struct filter_value filters[8], zone_filters[8][8];
+                u8 time_lock[8];
+                s16 tempo_speed[8]; u8 tempo[8], tempo_input[8], tempo_ppqn[8], beats[8][8]; };
 extern struct extras patch_live;
 #define eq_channels patch_live.channels
 #define eq_zones patch_live.zones
 #define patch_grains patch_live.grain
 #define filter_channels patch_live.filters
 #define filter_zones patch_live.zone_filters
+#define time_lock_channels patch_live.time_lock
+#define time_lock_tempo patch_live.tempo
+#define time_lock_speed patch_live.tempo_speed
+#define time_lock_input patch_live.tempo_input
+#define time_lock_ppqn patch_live.tempo_ppqn
+#define time_lock_beats patch_live.beats
 void eq_coefficients(const struct eq_value *value, s32 out[5][5]);
 /* A band's gain limit for its shape, and every gain brought inside it. */
 s32 eq_gain_limit(const struct eq_value *value, u32 band);

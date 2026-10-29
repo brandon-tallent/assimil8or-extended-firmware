@@ -527,21 +527,24 @@ static void ranges_build(struct ranges *out, u32 channel)
     }
 }
 
-/* The audio interrupt's frame: grain mode's channel, then a channel armed
- * for an audition. */
+/* The audio interrupt's frame: Time Lock's channels, grain mode's channel,
+ * then a channel armed for an audition. */
 static void frame(s32 *mix, const s32 *steps)
 {
+    if (timelock_active()) timelock_frame(mix, steps);
     if (grain_channel != GRAIN_OFF) render(mix, steps);
     audition_frame(mix, steps);
 }
 
-/* The hook runs only while grain mode or an audition needs it; the IRQ
- * reads the pointer once per frame. */
+/* The hook runs only while Time Lock, grain mode or an audition needs it;
+ * the IRQ reads the pointer once per frame. */
 void audio_hook_update(void)
 {
     MEMORY_BARRIER();
-    patch_grain_hook = grain_channel != GRAIN_OFF || audition_armed() ? frame : 0;
+    patch_grain_hook = grain_channel != GRAIN_OFF || audition_armed() || timelock_active() ? frame : 0;
 }
+
+u32 grain_playing_channel(void) { return grain_channel; }
 
 static void stop(void)
 {

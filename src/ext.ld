@@ -7,6 +7,10 @@ SECTIONS
     . = 0x9b010000;
     .extension : {
         KEEP(*(.extension_header))
+        . = ALIGN(64);
+        timelock_events_start = .;   /* Time Lock's event code, preloaded before each event */
+        *(.text.timelock_events)
+        timelock_events_end = .;
         *(.text*) *(.rodata*) *(.data*)
         . = ALIGN(8);
     }

@@ -5,11 +5,12 @@ An unofficial firmware extension for the Rossum Electro-Music Assimil8or:
 * A three-band EQ and high-pass filter on every channel, with an EQ of its own for any zone and CV control of every band.
 * A multimode filter on every channel, or on any zone alone: low-pass, band-pass, high-pass and notch at 12 or 24 dB per octave, band stop and a dual low-pass/band-pass, with resonance and CV control of cutoff, resonance, the type's extra setting and the type.
 * Grain mode: a channel or stereo pair plays its sample as up to eight overlapping grains, for stretching, freezing and scattering, with CV control of eight parameters.
+* Time Lock: change a drum loop's pitch without changing its timing. The tempo source is set per channel: the loop's own tempo, a percentage of it, MIDI clock or a CV clock. Channels 2–8 can use channel 1's setting.
 * Resample: record a channel's own output straight into one of its zones.
-* Presets keep the EQ, filter and grain settings, in files Rossum's software still loads.
+* Presets keep the EQ, filter, grain and Time Lock settings, in files Rossum's software still loads.
 * MIDI remote control (with a Locutus): read and edit presets, browse the card, audition and assign samples, drive the panel and read the display. The protocol is documented so anyone can write an editor.
 
-All original features remain. The new pages sit behind a second press of the Mutate and Phase Mod buttons, and Rossum's software can be loaded again at any time.
+All original features remain. The new pages sit behind a second press of the Mutate, Pitch, Envelope and Phase Mod buttons, and Rossum's software can be loaded again at any time.
 
 See the [New Features Guide](https://brandon-tallent.github.io/assimil8or-extended-firmware/manual.html) for how everything works.
 
@@ -80,7 +81,7 @@ inside it. Open it in a browser and use it as above.
 ## File layout
 
 - `src/` the overlay: C and assembly that replace a reclaimed region of the stock image
-- `ext/` the extension image the module loads from the card: the editor commands and grain mode
+- `ext/` the extension image the module loads from the card: the editor commands, grain mode, the Filter page and Time Lock
 - `src/stock_abi.ld` the stock addresses the code links against; `src/patch_layout.json` the instructions the patch replaces
 - `tools/make_patch.py` builds the patch; `patcher.py` and `web/` apply it
 

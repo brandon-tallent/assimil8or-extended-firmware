@@ -15,5 +15,4 @@ copies that routine from the user's own file. Patched software files
 contain Rossum's code and are local outputs, not release assets.
 
 This is an independent, unofficial project for the Rossum Electro-Music
-Assimil8or. Rossum, Assimil8or and Locutus identify the compatible
-instruments; no endorsement or affiliation is implied.
+Assimil8or. It is not affiliated with or endorsed by Rossum Electro-Music.

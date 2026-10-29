@@ -6,10 +6,6 @@
  * every EQ_CV_UPDATE_TICKS, and waits while a bank is pending, so continuous
  * modulation costs a bounded amount of foreground time. The renderer's glide
  * smooths each step. */
-/* Calibrated CV inputs: 24 signed halfwords, three rows (A/B/C) of eight
- * (ENGINE_CALIBRATION_CV_SAMPLE_BASE); 32768 is 5 V. */
-#define EQ_CV_SAMPLES 0x9ffffe50u
-#define EQ_CV_INPUTS 24u
 #define EQ_CV_ROW_WIDTH 8u
 #define EQ_CV_BANK_WIDTH 3u
 #define EQ_CV_VOLTS_PER_COUNT (5.0f/32768)

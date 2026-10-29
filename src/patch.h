@@ -400,6 +400,9 @@ _Static_assert(sizeof(struct counters) == 124, "diagnostics wire layout");
 #define MIDI_SYSEX_START          0xf0u
 #define MIDI_SYSEX_END            0xf7u
 #define MIDI_REALTIME_FIRST       0xf8u
+#define MIDI_CLOCK                0xf8u
+/* MIDI Clock bytes received (sysex.c), for Time Lock's tempo. */
+extern volatile u32 patch_midi_clock_ticks;
 #define MIDI_CHANNEL_MASK         0x0fu
 #define MIDI_STATUS_NIBBLE_SHIFT  4u
 #define MIDI_STATUS_NIBBLE_FIRST  8u

@@ -6,6 +6,14 @@ and under **Utilities > About this Module**.
 
 ## Unreleased
 
+## 1.1.0 — 2026-10-28
+
+### Added
+
+- Time Lock (press Pitch twice): pitch changes without changing a loop's
+  timing. Tempo source per channel: Own, Speed, MIDI clock or CV clock.
+  1.0.1 and Rossum's software ignore these preset settings.
+
 ## 1.0.1 — 2026-10-25
 
 ### Changed
