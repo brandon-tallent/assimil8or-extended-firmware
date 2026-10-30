@@ -72,6 +72,11 @@ extern u8 patch_storage_start[], patch_storage_end[];
  * default tables begin near 0x9bffef7e. */
 #define EXTENSION_BASE            0x9b010000u
 #define EXTENSION_MAX_BYTES       0x000f0000u /* image plus BSS, to 0x9b100000 */
+/* Folder-load sector cache (sector_cache.c), in DDR above the extension that
+ * no stock code addresses: one tag a slot, then the slots' sectors. */
+#define SECTOR_CACHE_BASE         0x9b100000u
+#define SECTOR_CACHE_SLOTS        4096u /* a power of two */
+#define SECTOR_BYTES              512u
 #define EXTENSION_MAGIC           0x31545845u /* "EXT1" after "SQA8" */
 #define EXTENSION_PATH_PREFIX     "0:/ext-"
 #define EXTENSION_BOOT_VOLUME     '0'
@@ -478,6 +483,7 @@ void patch_startup(void);
 void patch_rx_poll(void *rx);
 void patch_foreground_pass(void);
 void patch_storage_progress(u32 result);
+u32 patch_folder_load(const char *folder, u32 *loaded, void *progress);
 extern u32 foreground_storage_reads;
 void patch_render_stats(u32 start, u32 end);
 void patch_cv_transmit(void *manager);

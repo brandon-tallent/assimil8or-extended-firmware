@@ -230,6 +230,12 @@
    "site": "fatfs_disk_read"
   },
   {
+   "address": "0x800604d4",
+   "instruction": "b",
+   "target": "patch_disk_write",
+   "site": "fatfs_disk_write"
+  },
+  {
    "address": "0x80001418",
    "instruction": "b",
    "target": "patch_grain_capture_steps",
@@ -306,6 +312,18 @@
    "instruction": "bl",
    "target": "about_version_line",
    "site": "call of ui_draw_text_line_at_cursor"
+  },
+  {
+   "address": "0x80006e20",
+   "instruction": "bl",
+   "target": "patch_folder_load",
+   "site": "call of folder_reload_presets_and_samples"
+  },
+  {
+   "address": "0x80007284",
+   "instruction": "bl",
+   "target": "patch_folder_load",
+   "site": "call of folder_reload_presets_and_samples"
   },
   {
    "address": "0x8000d5c4",

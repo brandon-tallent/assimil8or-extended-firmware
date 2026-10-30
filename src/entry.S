@@ -58,18 +58,45 @@ patch_foreground_hook:
 
 /* A folder/sample load can stay inside one foreground pass for much longer
  * than the watchdog period. Successful disk reads are real work checkpoints.
- * Preserve the stock return value and its stronger r3 preservation. */
-.global patch_disk_read
+ * During a folder load one-sector reads come from the sector cache when they
+ * can. Preserve the stock return value and its stronger r3 preservation. */
+.global patch_disk_read, patch_disk_write
 patch_disk_read:
-    push {r3-r5, lr}
-    bl stock_disk_read
+    push {r3-r9, lr}
     mov r4, r0
-    bl patch_storage_progress
+    mov r5, r1
+    mov r6, r2
+    mov r7, r3
+    bl sector_cache_read
+    cmp r0, #0
+    movne r8, #0
+    bne 1f
     mov r0, r4
-    pop {r3-r5, pc}
+    mov r1, r5
+    mov r2, r6
+    mov r3, r7
+    bl stock_disk_read
+    movs r8, r0
+    bne 1f
+    mov r0, r4
+    mov r1, r5
+    mov r2, r6
+    mov r3, r7
+    bl sector_cache_fill
+1:  mov r0, r8
+    bl patch_storage_progress
+    mov r0, r8
+    pop {r3-r9, pc}
 stock_disk_read:
     add r0, r0, r0, lsl #1
     b fatfs_disk_read + 4
+/* Writes drop the sectors they replace from the cache. */
+patch_disk_write:
+    push {r0-r4, lr}
+    bl sector_cache_forget
+    pop {r0-r4, lr}
+    add r0, r0, r0, lsl #1
+    b fatfs_disk_write + 4
 
 /* Replays each hooked function's first stock instruction, then resumes it. */
 .equ MIDI_MANAGER_TRANSMIT_READY, 0x104

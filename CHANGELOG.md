@@ -6,6 +6,13 @@ and under **Utilities > About this Module**.
 
 ## Unreleased
 
+## 1.2.1 — 2026-10-30
+
+### Changed
+
+- Folder loads are much faster: a folder of 449 WAVs loads in under
+  2 seconds instead of nearly 50.
+
 ## 1.2.0 — 2026-10-30
 
 ### Added
