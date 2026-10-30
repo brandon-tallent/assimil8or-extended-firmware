@@ -116,11 +116,18 @@ enum { TIME_LOCK_TEMPO_CHANNEL_1, TIME_LOCK_TEMPO_OWN, TIME_LOCK_TEMPO_SPEED, TI
 #define TIME_LOCK_SPEED_MAX 3000     /* 400% */
 #define TIME_LOCK_SPEED_UNITY 1000   /* 100%, in tenths of a percent */
 #define TIME_LOCK_BEATS_MAX 128u
+#define EXTRAS_EXTENSION_BYTES 256u
+#define EXTRAS_EXTENSION_LINE  16u   /* bytes on a MixFX<n> line */
 struct extras { struct eq_value channels[8], zones[8][8]; struct grain_settings grain[8];
                 struct filter_value filters[8], zone_filters[8][8];
                 u8 time_lock[8];
-                s16 tempo_speed[8]; u8 tempo[8], tempo_input[8], tempo_ppqn[8], beats[8][8]; };
+                s16 tempo_speed[8]; u8 tempo[8], tempo_input[8], tempo_ppqn[8], beats[8][8];
+                /* The extension's settings (ext/mix_fx.h), kept and saved as
+                 * bytes; all zero is the extension's defaults. */
+                u8 extension[EXTRAS_EXTENSION_BYTES]; };
 extern struct extras patch_live;
+/* A library record's extras, or 0 when it has the defaults. */
+const struct extras *preset_extras_slot(u32 index);
 #define eq_channels patch_live.channels
 #define eq_zones patch_live.zones
 #define patch_grains patch_live.grain

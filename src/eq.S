@@ -187,6 +187,18 @@ patch_channel_eq:
 .Lgain_done:
     ldr r3, =patch_channel_out
     vst1.32 {d8-d11}, [r3]
+    ldr r12, =patch_channel_fx_hook
+    ldr r12, [r12]
+    cmp r12, #0
+    beq .Lfx_done
+    mov r0, r3
+    mov r4, sp
+    bic sp, sp, #7
+    blx r12
+    mov sp, r4
+    ldr r3, =patch_channel_out
+    vld1.32 {d8-d11}, [r3]
+.Lfx_done:
     vpop {d16-d31}
     vpop {d12-d15}
     vpop {d0-d7}

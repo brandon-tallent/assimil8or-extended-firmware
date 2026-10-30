@@ -18,6 +18,13 @@ s32 patch_grain_steps[AUDIO_CHANNELS], patch_grain_mix[AUDIO_CHANNELS];
 const struct panel_page *volatile patch_panel_page;
 const struct panel_page *volatile patch_envelope_page;
 const struct panel_page *volatile patch_pitch_page;
+const struct panel_page *volatile patch_mix_page;
+void (*volatile patch_channel_fx_hook)(s32 *channels);
+void (*volatile patch_mix_fx_hook)(s32 *mix);
+s32 patch_mix_frame[4];
+s32 patch_input_frame[2];
+s32 patch_fader_out[AUDIO_CHANNELS];
+void (*volatile patch_record_copied)(void *to, const void *from, u32 bytes);
 static struct extension_header *loaded;
 
 int extension_persist(u8 *image, u32 bytes, u32 crc);
@@ -118,6 +125,10 @@ void extension_foreground_poll(void)
     patch_panel_page = 0;
     patch_envelope_page = 0;
     patch_pitch_page = 0;
+    patch_mix_page = 0;
+    patch_channel_fx_hook = 0;
+    patch_mix_fx_hook = 0;
+    patch_record_copied = 0;
     cpu_irq_restore(irq);
     reload = 0;
     state = load();

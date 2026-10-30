@@ -86,6 +86,20 @@ enum { EXTENSION_UNTRIED, EXTENSION_LOADED, EXTENSION_MISSING, EXTENSION_INVALID
 #define AUDIO_CHANNELS            8u
 #define AUDIO_STEP_SHIFT          25u
 extern void (*volatile patch_grain_hook)(s32 *mix, const s32 *steps);
+/* Mix effects (ext/mix_fx.c). The channel hook gets the eight Q31 channel
+ * samples after the EQ, before the direct outputs and the mix, to replace.
+ * The mix hook gets patch_mix_frame: the stereo mix (left, right) as the
+ * renderer holds it, then the two output trims; mix = trim - value. */
+extern void (*volatile patch_channel_fx_hook)(s32 *channels);
+extern void (*volatile patch_mix_fx_hook)(s32 *mix);
+extern s32 patch_mix_frame[4];
+/* The Sample input's stereo frame this frame, Q31 (left, right). */
+extern s32 patch_input_frame[2];
+/* The eight channels this frame after Mix Output Level, mute and solo, Q31. */
+extern s32 patch_fader_out[AUDIO_CHANNELS];
+/* Stock copies of a channel, zone or whole preset record, and zone clears
+ * (from 0), as they happen: the extension moves the extras with them. */
+extern void (*volatile patch_record_copied)(void *to, const void *from, u32 bytes);
 extern s32 patch_grain_steps[AUDIO_CHANNELS], patch_grain_mix[AUDIO_CHANNELS];
 /* Grain settings, one set per channel: the fields in wire order, and a CV
  * route for eight of them. They belong to the preset (preset_extras.c) and

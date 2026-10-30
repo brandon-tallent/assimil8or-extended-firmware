@@ -254,6 +254,30 @@
    "site": "audio_per_channel_eq_insertion_point"
   },
   {
+   "address": "0x80002540",
+   "instruction": "b",
+   "target": "patch_mix_bus",
+   "site": "audio_filter_stereo_mix_output"
+  },
+  {
+   "address": "0x800024ac",
+   "instruction": "b",
+   "target": "patch_pan_capture",
+   "site": "audio_apply_stereo_pan"
+  },
+  {
+   "address": "0x80015a08",
+   "instruction": "b",
+   "target": "mix_panel_entry",
+   "site": "zone_editor_pan_mix_control_primary_callback"
+  },
+  {
+   "address": "0x800231a0",
+   "instruction": "b",
+   "target": "mix_panel_render",
+   "site": "ui_render_channel_pan_mix_page"
+  },
+  {
    "address": "0x8006514c",
    "instruction": "bl",
    "target": "patch_startup",
@@ -282,6 +306,132 @@
    "instruction": "bl",
    "target": "about_version_line",
    "site": "call of ui_draw_text_line_at_cursor"
+  },
+  {
+   "address": "0x8000d5c4",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x800122c8",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x800393d0",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8001394c",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8000d40c",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x80010ba0",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8004a4d8",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8004a738",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8004a758",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8004a81c",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8004a89c",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8004ab88",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x8004abc0",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x80018f88",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x80018fd0",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x80018f98",
+   "instruction": "bl",
+   "target": "patch_zone_clear",
+   "site": "call of preset_zone_initialize_empty"
+  },
+  {
+   "address": "0x80018fe8",
+   "instruction": "bl",
+   "target": "patch_zone_clear",
+   "site": "call of preset_zone_initialize_empty"
+  },
+  {
+   "address": "0x80011c60",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x80011c70",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x80011c80",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
+  },
+  {
+   "address": "0x80006370",
+   "instruction": "bl",
+   "target": "patch_record_copy",
+   "site": "call of memcpy"
   },
   {
    "address": "0x800000fc",

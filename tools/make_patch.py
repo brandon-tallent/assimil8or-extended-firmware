@@ -42,9 +42,9 @@ def version_flags() -> list[str]:
 # Sources that use the VFP in the foreground; everything else must leave it alone.
 # NEON sources also use NEON, built for speed (the audio interrupt saves
 # every NEON register).
-FLOAT_SOURCES = ("eq_math", "eq_model", "eq_panel")
+FLOAT_SOURCES = ("eq_math", "eq_model", "eq_panel", "filter_curve")
 NEON_SOURCES = ("hits", "joins")
-IRQ_SOURCES = ("timelock",)  # the audio interrupt's work, built for speed
+IRQ_SOURCES = ("timelock", "mix_fx")  # the audio interrupt's work, built for speed
 SPLICE_INSERT_SECTION = ".splice.{name}"
 
 

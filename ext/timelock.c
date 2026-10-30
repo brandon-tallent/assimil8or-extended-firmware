@@ -4,6 +4,7 @@
  * timeline and fills pitched-up slices. Positions are Q32 sample frames. */
 
 #include "timelock.h"
+#include "mix_fx.h"
 
 struct lock_table timelock_tables[2];
 volatile u32 timelock_live;
@@ -616,6 +617,20 @@ void timelock_tempo(u32 channel, u32 zone, struct timelock_tempo *out)
         out->bpm10 = (u32)((u64)out->own_bpm10 * (u32)(TIME_LOCK_SPEED_UNITY + time_lock_speed[tempo_channel(c)]) / TIME_LOCK_SPEED_UNITY);
 }
 
+/* A beat of a tempo in Q8 output frames, for the mix effects' delay: MIDI
+ * clock's (channel PRESET_CHANNELS), or the tempo a channel's Time Lock
+ * plays at. 0 when that clock has stopped or the channel has no tempo. */
+u32 timelock_beat_q8(u32 channel)
+{
+    if (channel >= PRESET_CHANNELS) return clock_live(&timelock_clocks[0]) ? timelock_clocks[0].period_q8 * MIDI_PPQN : 0;
+    u32 c = master(channel);
+    const struct clock *k = clock_of(c);
+    if (k) return clock_live(k) ? k->period_q8 * clock_ppqn(c) : 0;
+    struct timelock_tempo t;
+    timelock_tempo(c, REG32(ZONE_SELECTOR_BASE + c * ZONE_SELECTOR_STRIDE) & ZONE_SELECTOR_MASK, &t);
+    return t.bpm10 ? (u32)((u64)SECONDS_PER_MINUTE * TENTHS * OUTPUT_HZ * (1u << 8) / t.bpm10) : 0;
+}
+
 /* A zone's sample range, as the voice plays it (grain mode's ranges), and
  * the timeline's speed at the channel's tempo. */
 static void zone_build(struct lock_zone *out, u32 channel, u32 zone, u32 pair)
@@ -672,19 +687,20 @@ static u32 name_hash(const u8 *zone)
 }
 
 /* A Beats set by hand belongs to the zone's sample: a new sample in the zone
- * puts it back to Auto. A preset load brings its own and changes nothing. */
+ * puts it back to Auto. A preset load or record copy brings its own. */
 static void beats_follow_samples(void)
 {
-    static u32 names[PRESET_CHANNELS][ZONES], loaded, started;
-    u32 now[PRESET_CHANNELS][ZONES], load = patch_grain_loaded;
+    static u32 names[PRESET_CHANNELS][ZONES], loaded, copies, started;
+    u32 now[PRESET_CHANNELS][ZONES], load = patch_grain_loaded, copy = records_copied_count;
     for (u32 c = 0; c < PRESET_CHANNELS; ++c)
         for (u32 z = 0; z < ZONES; ++z) now[c][z] = name_hash(zone_record(c, z));
-    int adopt = !started || load != loaded || patch_grain_loaded != load;
+    int adopt = !started || load != loaded || patch_grain_loaded != load
+        || copy != copies || records_copied_count != copy;
     for (u32 c = 0; c < PRESET_CHANNELS; ++c)
         for (u32 z = 0; z < ZONES; ++z)
             if (!adopt && now[c][z] != names[c][z]) time_lock_beats[c][z] = 0;
     memcpy(names, now, sizeof(names));
-    loaded = patch_grain_loaded; started = 1;
+    loaded = patch_grain_loaded; copies = records_copied_count; started = 1;
 }
 
 void timelock_foreground(void)
@@ -713,6 +729,7 @@ void timelock_foreground(void)
         u32 tempo = tempo_of(c), from = tempo_channel(c);
         s32 input = eq_cv_input(time_lock_input[from] + EQ_CV_SOURCE_OFF, from);
         if (tempo == TIME_LOCK_TEMPO_MIDI) { t->clock[c] = 1; any = 1; }
+        if (mix_fx_wants_midi_clock()) any = 1;
         else if (tempo == TIME_LOCK_TEMPO_CV && input >= 0) { t->clock[c] = (u8)(2 + from); t->clock_input[1 + from] = (u8)input; any = 1; }
         if (c == grain_playing_channel()) continue;
         t->pair[c] = c + 1 < PRESET_CHANNELS && channel_record(c + 1)[CHANNEL_MODE] == CHANNEL_MODE_STEREO_RIGHT;

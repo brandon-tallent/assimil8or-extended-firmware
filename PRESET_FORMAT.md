@@ -1,7 +1,7 @@
 # Preset files
 
 Presets are Rossum's `prstNNN.yml` files with extra lines appended for the
-EQ, filter, grain and Time Lock settings. Rossum's software ignores these lines and
+EQ, filter, grain, Time Lock and mix effect settings. Rossum's software ignores these lines and
 drops them on save. Lines at their defaults are not written.
 
 The first extra line is `ExtrasFormat : 3`. Files without it are format 1
@@ -23,6 +23,7 @@ integers, except frequencies, which may have two decimals.
 | `GrainCV<c>` | source amount ×8: size, overlap, spray, detune, slide, scan, shape, pan |
 | `TimeLock<c>` | on [tempo speed input pulses]: on is 1 for Time Lock on; the rest, written when any is set, as below |
 | `TimeLock<c>Z<z>` | beats: the zone's loop length in beats, 1–128 (written only when set; without the line, Auto) |
+| `MixFX<n>` | 16 bytes, 0–255, of the mix effect settings from byte 16(n−1), as below; written when any is not 0 |
 
 Add `Z<z>` (for example `EQ1Z2`, `FILTR1Z2`) for a zone with its own EQ or
 filter.
@@ -42,6 +43,33 @@ Units:
   from 100%, −750 to 3000. Input: the CV clock's source, as CV source.
   Pulses: the CV clock's pulses a beat, 0 for 4. Absent numbers are 0, and
   input −4.
+
+Mix effect bytes (signed values as 0–255, two's complement). All zero, or
+no `MixFX` lines, means the defaults.
+
+| Bytes | Settings |
+| --- | --- |
+| 0 | layout: 1 |
+| 1–64 | channel 1–8 compressors, 8 bytes each: ratio threshold attack release drive gain mix sidechain |
+| 65–72 | mix compressor, as a channel's |
+| 73–80, 81–88 | channel 1–8 reverb sends, then delay sends, % |
+| 89–94 | reverb algo, decay, damp, level, chorus rate, chorus depth |
+| 95–100 | delay time, feedback, low cut, high cut, level, tempo |
+| 101–132 | channel 1–8 send CV: source amount for reverb, then delay |
+| 133–152 | CV source amount for decay, damp, reverb level, time, feedback, low cut, high cut, delay level, chorus rate, chorus depth |
+| 153–160 | channel 1–8 send point: 0 Post (after level and mute), 1 Pre |
+
+- Ratio: 0 Off, 1 1.5:1, 2 2:1, 3 3:1, 4 4:1, 5 6:1, 6 10:1, 7 20:1,
+  8 Limit. Threshold: dB below full scale, 0–40. Attack: 0.05, 0.1, 0.2,
+  0.5, 1, 2, 5, 10, 20, 50, 100 ms as 0–10. Release: 20, 50, 100, 200,
+  500, 1000, 2000 ms as 0–6. Gain: dB. Drive, mix: %. Sidechain: 0 the
+  channel itself, 1–8 a channel, 9 the Sample input.
+- Algo: 0–9 for DEP-5 algorithms 1–9 and 11. Decay: 0.1 s, 2–100.
+- Time: 1/16, 1/8T, 1/16D, 1/8, 1/4T, 1/8D, 1/4, 1/2T, 1/4D, 1/2, 1/1 as
+  0–10. Low cut: Off, 20, 50, 100, 200, 400, 800 Hz as 0–6. High cut: 1, 2,
+  3, 5, 8, 12 kHz, Off as 0–6. Tempo: 0 MIDI clock, 1–8 a channel's Time
+  Lock tempo, 9–209 for 40–240 BPM.
+- CV source and amount as above.
 
 Format 1 used `Grain` and `GrainCV` with no channel number: the playing
 channel (0 for none) followed by the `Grain<c>` values. They load into all

@@ -238,6 +238,9 @@ void channel_stop(u32 channel);
 extern const struct panel_page grain_page;
 void grains_foreground(void);
 void grains_init(void);
+/* Extras follow stock record copies (records.c); counts copies into the working preset. */
+void records_init(void);
+extern u32 records_copied_count;
 void filter_record(u32 index, u8 *out);
 void filter_page_init(void);
 void timelock_page_init(void); /* timelock_page.c: the Time Lock page, after Pitch */
@@ -268,6 +271,7 @@ void timelock_tempo(u32 channel, u32 zone, struct timelock_tempo *out);
 u32 timelock_guess(const u8 *sample, u32 span, u32 rate);
 u32 timelock_set(u32 channel, u32 zone, u32 field, s32 value, u8 *out, u32 *count);
 u32 grain_playing_channel(void); /* grains.c: PRESET_CHANNELS and above when off */
+u32 timelock_beat_q8(u32 channel); /* PRESET_CHANNELS: MIDI clock */
 
 /* resample.c: a channel's output recorded into one of its zones. */
 u32 resample_arm(u32 channel, u32 zone, u32 value, u32 sequence, u8 *out, u32 *count);

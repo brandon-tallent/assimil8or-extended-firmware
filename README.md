@@ -6,11 +6,13 @@ An unofficial firmware extension for the Rossum Electro-Music Assimil8or:
 * A multimode filter on every channel, or on any zone alone: low-pass, band-pass, high-pass and notch at 12 or 24 dB per octave, band stop and a dual low-pass/band-pass, with resonance and CV control of cutoff, resonance, the type's extra setting and the type.
 * Grain mode: a channel or stereo pair plays its sample as up to eight overlapping grains, for stretching, freezing and scattering, with CV control of eight parameters.
 * Time Lock: change a drum loop's pitch without changing its timing. The tempo source is set per channel: the loop's own tempo, a percentage of it, MIDI clock or a CV clock. Channels 2–8 can use channel 1's setting.
+* Compressors: one on every channel and one on the mix outputs, with drive, makeup gain, parallel mix and a sidechain from another channel or the Sample input.
+* Reverb and delay sends on the mix outputs: reverb, gated reverb and chorus algorithms modeled on the Roland DEP-5, and a ping-pong delay synced to MIDI clock or a channel's Time Lock tempo, with low and high cut on every repeat. Sends and effect settings take CV.
 * Resample: record a channel's own output straight into one of its zones.
-* Presets keep the EQ, filter, grain and Time Lock settings, in files Rossum's software still loads.
+* Presets keep the EQ, filter, grain, Time Lock, compressor and effect settings, in files Rossum's software still loads.
 * MIDI remote control (with a Locutus): read and edit presets, browse the card, audition and assign samples, drive the panel and read the display. The protocol is documented so anyone can write an editor.
 
-All original features remain. The new pages sit behind a second press of the Mutate, Pitch, Envelope and Phase Mod buttons, and Rossum's software can be loaded again at any time.
+All original features remain. The new pages sit behind a second press of the Mutate, Pitch, Envelope, Phase Mod and Pan/Mix buttons, and Rossum's software can be loaded again at any time.
 
 See the [New Features Guide](https://brandon-tallent.github.io/assimil8or-extended-firmware/manual.html) for how everything works.
 
@@ -35,7 +37,7 @@ To go back, load Rossum's own `app` with **Utilities > Load Software**.
 
 The patcher shows the version at the top of the page. On the module, go to
 **Utilities > About this Module**: the line under `SW Rev` reads
-`Tallent Edition Rev v1.0.0`. A version ending in `-dev` is a build between
+`Tallent Edition Rev v1.2.0`. A version ending in `-dev` is a build between
 releases.
 
 [CHANGELOG.md](CHANGELOG.md) lists the changes in each release.

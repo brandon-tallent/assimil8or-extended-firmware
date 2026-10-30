@@ -27,6 +27,7 @@ struct panel_page {
 extern const struct panel_page *volatile patch_panel_page;
 extern const struct panel_page *volatile patch_envelope_page;
 extern const struct panel_page *volatile patch_pitch_page;
+extern const struct panel_page *volatile patch_mix_page;  /* Pan/Mix steps to these */
 /* The EDIT scope the EQ pages share: editing a zone's settings (nonzero) or the channel's. */
 u32 panel_scope_zone(void);
 u32 panel_selected_zone(void);

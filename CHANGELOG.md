@@ -6,6 +6,18 @@ and under **Utilities > About this Module**.
 
 ## Unreleased
 
+## 1.2.0 — 2026-10-30
+
+### Added
+
+- Mix effects (press Pan/Mix twice): a compressor on each channel and on
+  the mix outputs, with Drive, Gain, Mix and a Sidechain from a channel or
+  the Sample input; reverb, gated reverb and chorus algorithms modeled on
+  the Roland DEP-5; a tempo-synced ping-pong delay. Each channel's sends
+  are taken before or after its level and mute. Sends and effect settings
+  take CV. Saved with presets as `MixFX` lines, which 1.1.0 and Rossum's
+  software ignore.
+
 ## 1.1.0 — 2026-10-28
 
 ### Added

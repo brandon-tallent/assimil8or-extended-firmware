@@ -15,6 +15,8 @@ void envelope_render_stock(u32 *task);
 void envelope_panel_entry(u32 *context, u32 argument);
 void pitch_entry_stock(u32 *context, u32 argument);
 void pitch_render_stock(u32 *task);
+void mix_entry_stock(u32 *context, u32 argument);
+void mix_render_stock(u32 *task);
 void eq_value_bar(u32 object, s32 x, s32 y, u32 value_bits); /* entry.S: float in s0 */
 char *ui_format_cv_input_selector(char *dest, const signed short *selector, s32 channel);
 static char *format_source(char *dest, s32 source)
@@ -33,12 +35,14 @@ int sprintf(char *buffer, const char *format, ...);
 #define BITS_PAGE_STATE 12u                 /* ZONE_EDITOR_BIT_PAGE_STATE */
 #define PHASE_PAGE_STATE 15u                /* ZONE_OPERATION_PANEL_PAGE_STATE */
 #define PITCH_PAGE_STATE 9u                 /* ZONE_EDITOR_PITCH_PAGE_STATE */
+#define MIX_PAGE_STATE 11u                  /* ZONE_EDITOR_PAN_MIX_PAGE_STATE */
 /* Front-panel records and callback slots (FRONT_PANEL_RECORD_*). */
 #define PANEL_SAMPLE 12u                    /* FRONT_PANEL_SAMPLE_BUTTON_RECORD_INDEX */
 #define PANEL_PRESS 0x00u
 #define PANEL_PHASE_MOD 17u                 /* FRONT_PANEL_BINDING_PHASE_MODE_RECORD */
 #define PANEL_PITCH 15u                     /* the Pitch button's front-panel record */
 #define PANEL_MUTATE 18u
+#define PANEL_PAN_MIX 19u                   /* the Pan/Mix button's front-panel record */
 #define PANEL_ENVELOPE 25u                  /* FRONT_PANEL_ENVELOPE_RECORD_INDEX */
 #define PANEL_DOUBLE 0x20u                  /* FRONT_PANEL_RECORD_DOUBLE_CALLBACK */
 #define PANEL_ENTER 27u                     /* FRONT_PANEL_TRANSIENT_EDITOR_RECORD_INDEX */
@@ -88,9 +92,9 @@ int sprintf(char *buffer, const char *format, ...);
 #define AMOUNT_COARSE 10
 
 /* PAGE_EXTRA and above are the extension's pages, in list order: those Phase
- * Mod steps to, from PAGE_ENVELOPE those Envelope steps to, and from
- * PAGE_PITCH those Pitch steps to. */
-enum { PAGE_NONE, PAGE_EQ, PAGE_CV, PAGE_EXTRA, PAGE_ENVELOPE = 64, PAGE_PITCH = 128 };
+ * Mod steps to, from PAGE_ENVELOPE those Envelope steps to, from PAGE_PITCH
+ * those Pitch steps to, and from PAGE_MIX those Pan/Mix steps to. */
+enum { PAGE_NONE, PAGE_EQ, PAGE_CV, PAGE_EXTRA, PAGE_ENVELOPE = 64, PAGE_PITCH = 128, PAGE_MIX = 192 };
 enum { FIELD_LOW_FREQUENCY, FIELD_MID_FREQUENCY, FIELD_HIGH_FREQUENCY,
        FIELD_LOW_GAIN, FIELD_MID_GAIN, FIELD_HIGH_GAIN, FIELD_LOW_Q, FIELD_MID_Q, FIELD_HIGH_Q,
        FIELD_HPF, FIELD_ON, FIELD_SCOPE, EQ_FIELD_COUNT };
@@ -109,8 +113,8 @@ u32 eq_panel_active(void) { return page != PAGE_NONE && editor(EDITOR_SELECTOR_P
 /* The extension's page being shown, or null: none shown, or the extension left. */
 static const struct panel_page *extra(void)
 {
-    u32 first = page >= PAGE_PITCH ? PAGE_PITCH : page >= PAGE_ENVELOPE ? PAGE_ENVELOPE : PAGE_EXTRA;
-    const struct panel_page *shown = page < PAGE_EXTRA ? 0 : page >= PAGE_PITCH ? patch_pitch_page :
+    u32 first = page >= PAGE_MIX ? PAGE_MIX : page >= PAGE_PITCH ? PAGE_PITCH : page >= PAGE_ENVELOPE ? PAGE_ENVELOPE : PAGE_EXTRA;
+    const struct panel_page *shown = page < PAGE_EXTRA ? 0 : page >= PAGE_MIX ? patch_mix_page : page >= PAGE_PITCH ? patch_pitch_page :
                                      page >= PAGE_ENVELOPE ? patch_envelope_page : patch_panel_page;
     for (u32 n = first; shown && n < page; ++n) shown = shown->next;
     return shown;
@@ -193,28 +197,37 @@ void envelope_panel_entry(u32 *context, u32 argument)
         bind(PANEL_ENVELOPE, PANEL_DOUBLE, 0);
     }
 }
-/* Pitch pressed on its own page or one of the extension's: the next page,
- * and after the last the Pitch page again. From any other page it is the
- * stock Pitch page. */
-void pitch_panel_entry(u32 *context, u32 argument);
-static void pitch_panel_step(u32 *context, u32 argument)
+/* Pitch or Pan/Mix pressed on its own page or one of the extension's: the
+ * next page, and after the last the stock page again. From any other page
+ * it is the stock page. A Stereo/Right channel keeps the stock notice. */
+struct family {
+    u32 first, state, button;
+    void (*stock)(u32 *, u32);
+    const struct panel_page *volatile *pages;
+    void (*step)(u32 *, u32);
+};
+static const struct family pitch_family, mix_family;
+static void family_entry(const struct family *f, u32 *context, u32 argument)
 {
-    u32 here = editor(EDITOR_SELECTOR_PAGE_STATE) == PITCH_PAGE_STATE;
-    page = eq_panel_active() && page >= PAGE_PITCH ? page + 1 : PAGE_PITCH;
-    if (here && extra()) show(page); else pitch_panel_entry(context, argument);
-}
-/* In place of the stock Pitch page entry: with the extension's pages to
- * show, a second press steps to them. A Stereo/Right channel keeps the stock
- * notice. */
-void pitch_panel_entry(u32 *context, u32 argument)
-{
-    pitch_entry_stock(context, argument);
+    f->stock(context, argument);
     leave();
-    if (patch_pitch_page && editor(EDITOR_SELECTOR_PAGE_STATE) == PITCH_PAGE_STATE) {
-        bind(PANEL_PITCH, PANEL_SHORT_RELEASE, pitch_panel_step);
-        bind(PANEL_PITCH, PANEL_DOUBLE, 0);
+    if (*f->pages && editor(EDITOR_SELECTOR_PAGE_STATE) == f->state) {
+        bind(f->button, PANEL_SHORT_RELEASE, f->step);
+        bind(f->button, PANEL_DOUBLE, 0);
     }
 }
+static void family_step(const struct family *f, u32 *context, u32 argument)
+{
+    u32 here = editor(EDITOR_SELECTOR_PAGE_STATE) == f->state;
+    page = eq_panel_active() && page >= f->first ? page + 1 : f->first;
+    if (here && extra()) show(page); else family_entry(f, context, argument);
+}
+static void pitch_panel_step(u32 *context, u32 argument) { family_step(&pitch_family, context, argument); }
+static void mix_panel_step(u32 *context, u32 argument) { family_step(&mix_family, context, argument); }
+static const struct family pitch_family = {PAGE_PITCH, PITCH_PAGE_STATE, PANEL_PITCH, pitch_entry_stock, &patch_pitch_page, pitch_panel_step};
+static const struct family mix_family = {PAGE_MIX, MIX_PAGE_STATE, PANEL_PAN_MIX, mix_entry_stock, &patch_mix_page, mix_panel_step};
+void pitch_panel_entry(u32 *context, u32 argument) { family_entry(&pitch_family, context, argument); }
+void mix_panel_entry(u32 *context, u32 argument) { family_entry(&mix_family, context, argument); }
 static void apply_value(struct eq_value *next);
 /* The value being edited, flat: the EQ page's fields at their defaults, its
  * CV routes (the EQ CV page's) kept. */
@@ -727,19 +740,13 @@ void eq_panel_render(u32 *task)
 {
     if (eq_panel_active()) render(task); else eq_render_stock(task);
 }
-void envelope_panel_render(u32 *task)
+/* The extension left while its page was shown: back to the stock page. */
+static void extra_render(u32 *task, void (*stock)(u32 *))
 {
     if (eq_panel_active() && !extra()) leave();
-    if (eq_panel_active()) render(task); else envelope_render_stock(task);
+    if (eq_panel_active()) render(task); else stock(task);
 }
-void pitch_panel_render(u32 *task)
-{
-    if (eq_panel_active() && !extra()) leave();
-    if (eq_panel_active()) render(task); else pitch_render_stock(task);
-}
-void phase_panel_render(u32 *task)
-{
-    /* The extension left while its page was shown. */
-    if (eq_panel_active() && !extra()) leave();
-    if (eq_panel_active()) render(task); else phase_render_stock(task);
-}
+void envelope_panel_render(u32 *task) { extra_render(task, envelope_render_stock); }
+void pitch_panel_render(u32 *task) { extra_render(task, pitch_render_stock); }
+void mix_panel_render(u32 *task) { extra_render(task, mix_render_stock); }
+void phase_panel_render(u32 *task) { extra_render(task, phase_render_stock); }

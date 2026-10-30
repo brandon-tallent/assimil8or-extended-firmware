@@ -1,4 +1,5 @@
 #include "ext.h"
+#include "mix_fx.h"
 
 /* Remote preset editing. The panel context only queues one
  * request; the foreground runs it with the stock shared UI/sample-operation
@@ -28,7 +29,7 @@ static struct {
     u32 saving, save_index;
 } job;
 
-static void init(void) { memset(&job, 0, sizeof(job)); folder_init(); stream_init(); audition_init(); grains_init(); filter_page_init(); timelock_page_init(); resample_init(); timelock_init(); }
+static void init(void) { memset(&job, 0, sizeof(job)); folder_init(); stream_init(); audition_init(); grains_init(); filter_page_init(); timelock_page_init(); mix_fx_init(); mix_page_init(); resample_init(); timelock_init(); records_init(); }
 static int busy(void) { return job.command != 0; }
 
 /* EDIT_SET with this sequence, which no request uses, is automation. */
@@ -732,6 +733,7 @@ static void foreground(void)
     filter_page_foreground();
     slice_maps_foreground();
     timelock_foreground();
+    mix_fx_foreground();
     u32 command = job.command;
     if (!command) { automate_foreground(); return; }
     u8 out[REPLY_BYTES - 1]; u32 count = 0, status = OK;

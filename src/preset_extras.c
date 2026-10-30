@@ -37,6 +37,8 @@
  *     (-4 none); the clock's pulses a beat (0: 4).
  *   TimeLock<c>Z<z> : beats. The zone's loop length in beats, written when
  *     set (0: guessed).
+ *   MixFX<n> : sixteen bytes (0-255) of the extension's settings, n from 1:
+ *     bytes 16(n-1) on. Written when any is not 0. ext/mix_fx.h defines them.
  * Format 1 grain lines, read into all eight channels:
  *   Grain : channel size overlap ... skew (channel 0: none plays)
  *   GrainCV : source amount for each grain route
@@ -52,6 +54,7 @@
 #define PRESET_LIBRARY_RECORDS    200u
 #define PRESET_YAML_STATE_MODEL   0x0cu
 #define STATUS_BYTE_MASK          0xffu
+#define PRESET_ZONE_BYTES         0x4cu     /* PRESET_ZONE_RECORD_SIZE */
 #define CHANNELS                  8u
 #define ZONES                     8u
 #define NO_ZONE                   ZONES
@@ -77,6 +80,7 @@ u32 extras_save_stock(void *holder, u32 index, void *model);
 u32 extras_erase_stock(void *holder, u32 index);
 u32 extras_write_stock(void *model, const char *path, u32 ordinal);
 u32 extras_differs_stock(void *holder);
+void preset_zone_initialize_empty(void *zone);
 int sprintf(char *buffer, const char *format, ...);
 int strncasecmp(const char *a, const char *b, u32 bytes);
 
@@ -246,6 +250,16 @@ static const char *hundredths(const char *s, s32 *out)
 static void line(u32 model, const char *s)
 {
     while (*s == ' ' || *s == '\t') ++s;
+    if (!strncasecmp(s, "MixFX", 5)) {
+        s32 chunk, n[EXTRAS_EXTENSION_LINE], more;
+        if (!(s = number(s + 5, &chunk)) || chunk < 1 || (u32)chunk > EXTRAS_EXTENSION_BYTES / EXTRAS_EXTENSION_LINE) return;
+        u32 count = 0;
+        for (const char *next; count < EXTRAS_EXTENSION_LINE && (next = number(s, &n[count])); s = next) ++count;
+        struct extras *e = destination(model);
+        if (count != EXTRAS_EXTENSION_LINE || number(s, &more) || !e) return;
+        for (u32 i = 0; i < count; ++i) e->extension[(u32)(chunk - 1) * EXTRAS_EXTENSION_LINE + i] = (u8)clamp(n[i], 0, 255);
+        return;
+    }
     if (!strncasecmp(s, "TimeLock", 8)) {
         s += 8;
         u32 channel = (u32)(*s++ - '1'), zone = NO_ZONE;
@@ -432,6 +446,13 @@ static void append(const char *path, const struct extras *e)
                 write_line(&file, key, n, TIME_LOCK_ZONE_NUMBERS, NO_DECIMALS);
             }
         }
+        for (u32 chunk = 0; chunk < EXTRAS_EXTENSION_BYTES / EXTRAS_EXTENSION_LINE; ++chunk) {
+            char key[KEY_BYTES];
+            u32 any = 0;
+            for (u32 i = 0; i < EXTRAS_EXTENSION_LINE; ++i) any |= n[i] = e->extension[chunk * EXTRAS_EXTENSION_LINE + i];
+            sprintf(key, "MixFX%d", chunk + 1);
+            if (any) write_line(&file, key, n, EXTRAS_EXTENSION_LINE, NO_DECIMALS);
+        }
     }
     resource_close(&file);
 }
@@ -485,6 +506,24 @@ u32 preset_extras_write(void *model, const char *path, u32 ordinal)
     u32 status = extras_write_stock(model, path, ordinal);
     if (!(status & STATUS_BYTE_MASK) && ordinal < PRESET_LIBRARY_RECORDS && library[ordinal]) append(path, library[ordinal]);
     return status;
+}
+/* A library record's extras, or 0 when it has none (the defaults). */
+const struct extras *preset_extras_slot(u32 index)
+{
+    return index < PRESET_LIBRARY_RECORDS ? library[index] : 0;
+}
+/* Stock record copies and zone clears call these in place of memcpy and
+ * preset_zone_initialize_empty. */
+void *patch_record_copy(void *to, const void *from, u32 bytes)
+{
+    memcpy(to, from, bytes);
+    if (patch_record_copied) patch_record_copied(to, from, bytes);
+    return to;
+}
+void patch_zone_clear(void *zone)
+{
+    preset_zone_initialize_empty(zone);
+    if (patch_record_copied) patch_record_copied(zone, 0, PRESET_ZONE_BYTES);
 }
 /* preset_working_model_differs_from_library: unsaved extras count too. */
 u32 preset_extras_differs(u32 *holder)

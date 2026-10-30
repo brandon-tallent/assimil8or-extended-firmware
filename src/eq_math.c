@@ -1,14 +1,15 @@
 #include "eq.h"
+#include "eq_design.h"
 /* Foreground-only VFP math. The stock IRQ entry saves every D register and
  * FPSCR, including on nested interrupts. No libm or soft-float helpers. */
-static double sine(double x)
+double sine(double x)
 {
     double term = x, sum = x, square = -x*x;
     for (u32 n = 2; n <= 20; n += 2) { term *= square / (n*(n+1)); sum += term; }
     return sum;
 }
-static double cosine(double x) { return sine(1.5707963267948966 - x); }
-static double exponential(double x)
+double cosine(double x) { return sine(1.5707963267948966 - x); }
+double exponential(double x)
 {
     double term = 1, sum = 1;
     for (u32 n = 1; n <= 32; ++n) { term *= x/n; sum += term; }
@@ -79,7 +80,7 @@ void eq_coefficients(const struct eq_value *value, s32 out[5][5])
 }
 /* Natural log, positive normal doubles only. Mantissa reduction bounds the
  * atanh series argument to 1/3. Used once per changed response graph. */
-static double logarithm(double x)
+double logarithm(double x)
 {
     union { double d; u32 word[2]; } number = { .d = x };
     s32 exponent = (s32)((number.word[1] >> 20) & 2047) - 1023;
@@ -168,10 +169,6 @@ void eq_curve(const struct eq_value *value, u32 points, u8 *out, s32 top, s32 bo
 #define Q30_SCALE 1073741824.0
 #define Q31_SCALE 2147483648.0
 #define Q32_SCALE 4294967296.0
-enum { MIX_INPUT, MIX_LP, MIX_BP, MIX_HP, MIX_LP1, MIX_WEIGHTS };
-struct filter_design {
-    double cutoff[2], damping[2], mix1[4], mix2[MIX_WEIGHTS]; /* mix1 has no MIX_LP1 */
-};
 const char *filter_extra_name(u32 type)
 {
     switch (type) {
@@ -180,7 +177,7 @@ const char *filter_extra_name(u32 type)
     default: return 0;
     }
 }
-static void filter_design(const struct filter_value *v, struct filter_design *d)
+void filter_design(const struct filter_value *v, struct filter_design *d)
 {
     memset(d, 0, sizeof(*d));
     double r = v->resonance*(1.0/FILTER_RESONANCE_MAX);
@@ -268,45 +265,4 @@ void filter_lane(const struct filter_value *v, s32 out[FILTER_VECTORS])
     out[FILTER_VECTOR_G2] = float_bits((float)section_g(d.cutoff[1]));
     out[FILTER_VECTOR_K1] = float_bits((float)d.damping[0]);
     out[FILTER_VECTOR_K2] = float_bits((float)d.damping[1]);
-}
-/* A section's taps at frequency w (radians per sample): with s = j*t the
- * lowpass is 1/d, the bandpass s/d and the highpass s*s/d, d = s*s + k*s + 1. */
-static void filter_taps(double cutoff, double damping, double w, double lp[2], double bp[2], double hp[2])
-{
-    double x = (cutoff > EQ_FREQUENCY_MAX ? EQ_FREQUENCY_MAX : cutoff)*(3.141592653589793/48000);
-    double t = (sine(w*0.5)/cosine(w*0.5))*cosine(x)/sine(x);
-    double dr = 1 - t*t, di = damping*t, n = dr*dr + di*di;
-    lp[0] = dr/n; lp[1] = -di/n;
-    bp[0] = di*t/n; bp[1] = dr*t/n;                 /* j*t / d */
-    hp[0] = -t*t*dr/n; hp[1] = t*t*di/n;            /* -t*t / d */
-}
-/* The type's response in dB, rows top..bottom spanning db_top..db_bottom,
- * at points logarithmically spaced from 20 Hz to 20 kHz. */
-void filter_curve(const struct filter_value *value, u32 points, u8 *out, s32 top, s32 bottom, s32 db_top, s32 db_bottom)
-{
-    struct filter_design d;
-    filter_design(value, &d);
-    double frequency = EQ_FREQUENCY_MIN, multiplier = exponential(6.907755278982137/(points-1));
-    for (u32 n = 0; n < points; ++n, frequency *= multiplier) {
-        double w = frequency*(6.283185307179586/48000);
-        double a[2][2] = {{d.mix1[MIX_INPUT], 0}, {d.mix2[MIX_INPUT], 0}}, lp1[2] = {0, 0};
-        for (u32 section = 0; section < 2; ++section) {
-            double lp[2], bp[2], hp[2];
-            filter_taps(d.cutoff[section], d.damping[section], w, lp, bp, hp);
-            const double *m = section ? d.mix2 : d.mix1;
-            for (u32 part = 0; part < 2; ++part) {
-                a[section][part] += m[MIX_LP]*lp[part] + m[MIX_BP]*bp[part] + m[MIX_HP]*hp[part];
-                if (!section) lp1[part] = lp[part];
-            }
-        }
-        /* Section 2 after section 1, plus section 1's lowpass beside it. */
-        double re = a[0][0]*a[1][0] - a[0][1]*a[1][1] + d.mix2[MIX_LP1]*lp1[0];
-        double im = a[0][0]*a[1][1] + a[0][1]*a[1][0] + d.mix2[MIX_LP1]*lp1[1];
-        double magnitude = re*re + im*im;
-        if (magnitude < 1e-12) magnitude = 1e-12;
-        double decibels = logarithm(magnitude)*(10/2.302585092994046);
-        double rows = (db_top - decibels)*(bottom - top)/(db_top - db_bottom);
-        s32 y = top + (s32)(rows + (rows < 0 ? -0.5 : 0.5));
-        out[n] = (u8)(y < top ? top : y > bottom ? bottom : y);
-    }
 }

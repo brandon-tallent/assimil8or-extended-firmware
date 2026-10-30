@@ -13,7 +13,8 @@
  * patch_resample_frame replaces the first two instructions of the stock
  * 48 kHz capture stage, which form the Sample input's stereo frame in d0.
  * While a source is set, d0 is that channel's last output and the next
- * channel's. r5 and the flags are dead until the stage's next instruction.
+ * channel's. Before that, the Sample input's frame is kept in
+ * patch_input_frame for the mix effects. r5 and the flags are dead until the stage's next instruction.
  */
 .syntax unified
 .cpu cortex-a8
@@ -32,6 +33,9 @@ patch_grain_capture_steps:
 patch_resample_frame:
     vrhadd.s32	d0, d10, d12
     vqshl.s32	d0, d0, #4
+    movw	r5, #:lower16:patch_input_frame
+    movt	r5, #:upper16:patch_input_frame
+    vst1.32	{d0}, [r5]
     movw	r5, #:lower16:patch_resample_source
     movt	r5, #:upper16:patch_resample_source
     ldr	r5, [r5]
@@ -60,3 +64,39 @@ patch_grain_mix_stage:
     pop	{r0-r3, r12, lr}
     b	audio_apply_channel_bit_depth
 .ltorg
+
+/* patch_mix_bus replaces the first instruction of the stock stereo output
+ * filter. d0 holds the two mix samples as the outputs take them and d1 the
+ * two output trims. The hook is general-register C; r4 is dead here. */
+.global patch_mix_bus
+patch_mix_bus:
+    push	{r0-r4, r12, lr}
+    ldr	r4, =patch_mix_fx_hook
+    ldr	r12, [r4]
+    cmp	r12, #0
+    beq	1f
+    ldr	r0, =patch_mix_frame
+    vst1.32	{d0-d1}, [r0]
+    mov	r4, sp
+    bic	sp, sp, #7
+    blx	r12
+    mov	sp, r4
+    ldr	r0, =patch_mix_frame
+    vld1.32	{d0}, [r0]
+1:  pop	{r0-r4, r12, lr}
+    vld1.32	{d1-d3}, [r2 :64]!
+    b	audio_filter_stereo_mix_output + 4
+.ltorg
+
+/* patch_pan_capture replaces the first instruction of the stock pan stage.
+ * q4/q5 hold the eight channels after their Mix Output Level, mute and
+ * solo: the mix effects' post-fader sends read them. r0 is saved here. */
+.global patch_pan_capture
+patch_pan_capture:
+    push	{r0}
+    movw	r0, #:lower16:patch_fader_out
+    movt	r0, #:upper16:patch_fader_out
+    vst1.32	{d8-d11}, [r0]
+    pop	{r0}
+    vld1.16	{d22-d25}, [r2 :128]!
+    b	audio_apply_stereo_pan + 4
