@@ -85,6 +85,22 @@ u32 mix_fx_reduction_db(u32 compressor);
 /* The delay's cut frequencies in Hz; 0 is Off. */
 extern const u16 mix_low_cut_hz[MIX_FILTER_STEPS], mix_high_cut_hz[MIX_FILTER_STEPS];
 
+/* Remote edits (editor.c's Set, IDs from SET_MIX_FIRST): a compressor's
+ * fields in struct order (channel byte 0-7, or MIX_CHANNELS for the mix),
+ * a channel's sends and send routes, the twelve reverb and delay bytes from
+ * reverb_algo in struct order, the bus routes, then Status, which only
+ * reads. A route is its source, then its amount. */
+#define MIX_BUS_BYTES 12u /* reverb_algo to delay_tempo */
+enum {
+    MIX_SET_COMP, MIX_SET_REVERB_SEND = MIX_SET_COMP + sizeof(struct mix_comp_set), MIX_SET_DELAY_SEND,
+    MIX_SET_SEND_PRE, MIX_SET_SEND_ROUTE, MIX_SET_BUS = MIX_SET_SEND_ROUTE + 2 * MIX_SEND_ROUTES,
+    MIX_SET_BUS_ROUTE = MIX_SET_BUS + MIX_BUS_BYTES, MIX_SET_STATUS = MIX_SET_BUS_ROUTE + 2 * MIX_BUS_ROUTES, MIX_SET_IDS
+};
+/* Status: each compressor's gain reduction in whole dB (eight channels,
+ * then the mix), then u16 the delay's tempo in tenths of BPM. */
+#define MIX_STATUS_BYTES (MIX_CHANNELS + 1u + 2u)
+u32 mix_set(u32 channel, u32 id, s32 value, u8 *out, u32 *count);
+
 /* Marks the settings changed; the audio interrupt recalculates them. */
 void mix_fx_update(void);
 /* The tempo the delay follows, in tenths of BPM; 0 when its clock has stopped. */

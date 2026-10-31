@@ -1,4 +1,5 @@
 #include "ext.h"
+#include "mix_fx.h"
 
 /* Streams for an editor's background mirror: one small request, then reply
  * frames under the request's sequence until the data is complete, sent as
@@ -9,9 +10,10 @@
  *
  * Every frame: u8 status, u8 kind, u16 index, then data. The index is the
  * byte offset (model), column (peaks), channel (samples), first entry
- * (browsed folder) or first record (EQ, filter). A failed frame carries its status and ends the stream. */
+ * (browsed folder), first record (EQ, filter) or byte offset of the mix
+ * effects' settings (mix_fx.h). A failed frame carries its status and ends the stream. */
 
-enum { STREAM_MODEL, STREAM_ZONE_PEAKS, STREAM_FILE_PEAKS, STREAM_SAMPLES, STREAM_FOLDER, STREAM_EQ, STREAM_FILTER };
+enum { STREAM_MODEL, STREAM_ZONE_PEAKS, STREAM_FILE_PEAKS, STREAM_SAMPLES, STREAM_FOLDER, STREAM_EQ, STREAM_FILTER, STREAM_MIX };
 #define STREAM_HEADER        3u  /* kind, u16 index */
 #define STREAM_DATA          (REPLY_BYTES - 1u - STREAM_HEADER)
 #define STREAM_REQUEST_MAX   48u
@@ -80,6 +82,9 @@ static u32 start(void)
         return stream.bytes == 1 ? OK : BAD_LENGTH;
     case STREAM_FILTER:
         stream.end = EQ_RECORDS;
+        return stream.bytes == 1 ? OK : BAD_LENGTH;
+    case STREAM_MIX:
+        stream.end = sizeof(struct mix_settings);
         return stream.bytes == 1 ? OK : BAD_LENGTH;
     }
     return BAD_RANGE;
@@ -151,6 +156,12 @@ static int next_frame(void)
         count = stream.end - stream.index < STREAM_FILTER_RECORDS ? stream.end - stream.index : STREAM_FILTER_RECORDS;
         for (u32 r = 0; r < count; ++r) filter_record(stream.index + r, data + r * FILTER_RECORD_BYTES);
         send(OK, data, count * FILTER_RECORD_BYTES);
+        stream.index += count;
+        break;
+    case STREAM_MIX:
+        count = stream.end - stream.index < STREAM_DATA ? stream.end - stream.index : STREAM_DATA;
+        memcpy(data, (const u8 *)mix_now() + stream.index, count);
+        send(OK, data, count);
         stream.index += count;
         break;
     case STREAM_FOLDER: {

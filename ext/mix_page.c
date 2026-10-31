@@ -317,6 +317,55 @@ static void position_page(const struct page_def *p, u32 channel, u32 cursor, u32
     else set(f, channel, linear(f->low, f->high, q16));
 }
 
+/* ---- remote edits ---- */
+
+static u32 status(u8 *out, u32 *count)
+{
+    for (u32 c = 0; c <= MIX_CHANNELS; ++c) {
+        u32 db = mix_fx_reduction_db(c);
+        out[c] = (u8)(db > 255u ? 255u : db);
+    }
+    put_u16(out + MIX_CHANNELS + 1u, mix_fx_bpm10());
+    *count = MIX_STATUS_BYTES;
+    return OK;
+}
+
+u32 mix_set(u32 channel, u32 id, s32 value, u8 *out, u32 *count)
+{
+    const struct field *f = 0;
+    if (id == MIX_SET_STATUS) return status(out, count);
+    if (id >= MIX_SET_IDS) return BAD_RANGE;
+    if (id < MIX_SET_REVERB_SEND) {
+        if (channel > MIX_CHANNELS) return BAD_RANGE;
+        f = channel == MIX_CHANNELS ? &master_fields[id] : &comp_fields[id];
+    } else if (id < MIX_SET_BUS) {
+        if (channel >= MIX_CHANNELS) return BAD_RANGE;
+        if (id < MIX_SET_SEND_ROUTE) f = &send_fields[id - MIX_SET_REVERB_SEND];
+    } else if (id < MIX_SET_BUS_ROUTE) {
+        u32 k = id - MIX_SET_BUS;
+        u32 reverbs = sizeof(reverb_fields) / sizeof(reverb_fields[0]);
+        f = k < reverbs ? &reverb_fields[k] : &delay_fields[k - reverbs];
+    }
+    s32 stored;
+    if (f) {
+        set(f, channel, value);
+        stored = *value_at(f, channel);
+    } else {
+        /* A route: its source (even) or amount (odd), stepped as on the panel. */
+        u32 k = id < MIX_SET_BUS ? id - MIX_SET_SEND_ROUTE : id - MIX_SET_BUS_ROUTE;
+        struct mix_settings *m = mix_edit();
+        struct mix_route *r = id < MIX_SET_BUS ? &m->send_route[channel][k / 2u] : &m->bus_route[k / 2u];
+        static const struct field bus_route_field = {0, 0, PERCENT, 0, 0, 0, 0, 0, 0};
+        if (k & 1u) stored = r->amount = (signed char)clamp(value, -AMOUNT_MAX, AMOUNT_MAX);
+        else stored = r->source = (signed char)source_step(id < MIX_SET_BUS ? &send_fields[0] : &bus_route_field,
+                                                           clamp(value, EQ_CV_SOURCE_OFF, EQ_CV_SOURCE_MAX), 0);
+        changed();
+    }
+    put_u32(out, (u32)stored);
+    *count = 4;
+    return OK;
+}
+
 static u32 revision(void)
 {
     return (own_revision * 31 + panel_selected_channel()) * 31 + mix_fx_bpm10();

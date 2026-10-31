@@ -6,6 +6,23 @@ and under **Utilities > About this Module**.
 
 ## Unreleased
 
+## 1.2.2 — 2026-10-31
+
+### Added
+
+- Editors can change every mix effects setting over MIDI (Set IDs
+  200–246).
+- Editors can read each compressor's gain reduction and the delay's tempo
+  live (ID 247).
+- Editors can read all mix effects settings at once (stream kind 7).
+- A remote edit redraws an open mix effects page.
+- The preset summary ends with a checksum of the mix effects settings.
+
+### Fixed
+
+- A compressor driving a channel to full scale with Mix at 100% wrapped
+  into harsh distortion.
+
 ## 1.2.1 — 2026-10-30
 
 ### Changed
@@ -17,13 +34,18 @@ and under **Utilities > About this Module**.
 
 ### Added
 
-- Mix effects (press Pan/Mix twice): a compressor on each channel and on
-  the mix outputs, with Drive, Gain, Mix and a Sidechain from a channel or
-  the Sample input; reverb, gated reverb and chorus algorithms modeled on
-  the Roland DEP-5; a tempo-synced ping-pong delay. Each channel's sends
-  are taken before or after its level and mute. Sends and effect settings
-  take CV. Saved with presets as `MixFX` lines, which 1.1.0 and Rossum's
-  software ignore.
+- Mix effects: press Pan/Mix twice.
+- A compressor on each channel and on the mix outputs, with Drive, Gain
+  and Mix.
+- Compressor Sidechain from any channel or the Sample input.
+- Reverb, gated reverb and chorus algorithms modeled on the Roland DEP-5.
+- A tempo-synced ping-pong delay.
+- Each channel's sends are taken before or after its level and mute.
+- Sends and effect settings take CV.
+
+### Presets
+
+- New `MixFX` lines, which 1.1.0 and Rossum's software ignore.
 
 ## 1.1.0 — 2026-10-28
 

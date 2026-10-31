@@ -22,6 +22,7 @@
 #define DELAY_RETARGET_MASK 255u   /* the delay follows the clock every 256 frames */
 #define SOFT_CLIP_LIMIT    49152   /* 1.5 in Q15: the delay loop's clip reaches 1.0 here */
 #define PERCENT_Q15        328     /* 1 % in Q15 */
+#define Q15_ONE            32768
 
 struct mix_settings mix_defaults;
 
@@ -161,7 +162,7 @@ static void comp_coef_set(struct comp_coef *k, const struct mix_comp_set *s)
     k->slope = ratio_slope[s->ratio < MIX_RATIOS ? s->ratio : 0];
     k->threshold = -DB_TO_Q24(s->threshold);
     k->makeup = DB_TO_Q24(s->gain);
-    k->mix_q15 = s->mix * PERCENT_Q15;
+    k->mix_q15 = (s32)(s->mix * Q15_ONE / MIX_PERCENT_MAX);
     k->drive = s->drive;
     k->attack = time_coef(mix_attack_hundredths_ms[s->attack < MIX_ATTACKS ? s->attack : 0]);
     k->release = time_coef(100u * mix_release_ms[s->release < MIX_RELEASES ? s->release : 0]);
@@ -198,7 +199,7 @@ static void drive_build(u16 *curve, u32 amount)
 }
 
 /* Parallel compression: the dry signal and the compressed one by Mix. */
-static inline s32 blend(s32 dry, s32 wet, s32 mix_q15) { return dry + (s32)(((s64)(wet - dry) * mix_q15) >> 15); }
+static inline s32 blend(s32 dry, s32 wet, s32 mix_q15) { return sat32((s64)dry + ((((s64)wet - dry) * mix_q15) >> 15)); }
 
 static inline s32 apply(s32 x, s32 gain_q24) { return sat32(((s64)x * gain_q24) >> 24); }
 
@@ -643,7 +644,8 @@ static void sends_frame(void)
 
 static void mix_frame(s32 *frame)
 {
-    s32 mix[2] = {frame[2] - frame[0], frame[3] - frame[1]};
+    /* The outputs take trim - mix, saturated: recover the mix in 64 bits. */
+    s32 mix[2] = {sat32((s64)frame[2] - frame[0]), sat32((s64)frame[3] - frame[1])};
     ++frames;
     sends_frame();
     if (dirty) { dirty = 0; settings_changed(); control(); }

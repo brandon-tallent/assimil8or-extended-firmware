@@ -278,10 +278,11 @@ loads and sample jobs. While one runs, another replies Busy.
 | u32 | Checksum of the grain settings |
 | u32 | Checksum of the channel and zone filters |
 | 8 × u8 | Each channel's Time Lock: 0 Off, 1 On |
+| u32 | CRC-32 of the mix effects' settings, the 161 bytes stream kind 7 sends |
 
 Poll this to follow the module. When a checksum changes, read that part
-again. The three last checksums change when the settings do; they are not
-computed over the bytes any reply carries.
+again. The EQ, grain and filter checksums change when the settings do; they
+are not computed over the bytes any reply carries.
 
 **33 Read model.** u16 offset, u8 count (1–120). Reply: that many bytes of
 [the working model](#the-working-model). Stream kind 0 reads all of it at
@@ -539,6 +540,49 @@ pan and mix, into one of its own zones.
 Start, stop and cancel a take with the Recording commands. A Master with a
 Stereo/Right partner gives a stereo take, any other channel a mono one.
 
+### Mix effects
+
+The compressors, sends, reverb and delay of the Pan/Mix pages. The zone
+byte is unused. A compressor's IDs take the channel byte 0…7, or 8 for the
+mix compressor; the send IDs take a channel; the reverb and delay IDs ignore
+it. A Stereo/Right channel plays its master's compressor and sends. Values
+are the panel's steps.
+
+| ID | Parameter | Range |
+| ---: | --- | --- |
+| 200 | Ratio | 0 Off, 1.5:1, 2:1, 3:1, 4:1, 6:1, 10:1, 20:1, 8 Limit |
+| 201 | Threshold, dB below full scale | 0…40 |
+| 202 | Attack | 0…10: 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100 ms |
+| 203 | Release | 0…6: 20, 50, 100, 200, 500 ms, 1, 2 s |
+| 204 | Drive | 0…100 % |
+| 205 | Gain (makeup) | 0…24 dB |
+| 206 | Mix (wet) | 0…100 % |
+| 207 | Sidechain | 0 Self, 1…8 channel 1…8, 9 the Sample input |
+| 208, 209 | Reverb send, Delay send | 0…100 % |
+| 210 | Sends | 0 Post, 1 Pre |
+| 211 + 2n | Send route n's CV source, n = 0 Reverb, 1 Delay | −4…23 |
+| 212 + 2n | Send route n's CV amount | −100…100 |
+| 215 | Reverb algorithm | 0…9: DEP-5 algorithms 1–9 and 11 |
+| 216 | Decay, 0.1 s; on algorithms 7 and up the gate, 5 ms a step | 2…100 |
+| 217, 218 | Damp, Reverb level | 0…100 % |
+| 219, 220 | Chorus rate, depth | 0…100 %: 0.08 to 5 Hz; 0 to 5 ms |
+| 221 | Delay time | 0…10: 1/16, 1/8T, 1/16D, 1/8, 1/4T, 1/8D, 1/4, 1/2T, 1/4D, 1/2, 1/1 |
+| 222 | Feedback | 0…120 % |
+| 223 | Low cut | 0…6: Off, 20, 50, 100, 200, 400, 800 Hz |
+| 224 | High cut | 0…6: 1, 2, 3, 5, 8, 12 kHz, Off |
+| 225 | Delay level | 0…100 % |
+| 226 | Delay tempo | 0 MIDI clock, 1…8 channel 1…8's Time Lock tempo, 9…209 40…240 BPM |
+| 227 + 2n | Mix route n's CV source | −4, 0…23 (no CV A…C) |
+| 228 + 2n | Mix route n's CV amount | −100…100 |
+
+The ten mix routes, n = 0…9: Decay, Damp, Reverb level, Delay time,
+Feedback, Low cut, High cut, Delay level, Chorus rate, Chorus depth.
+
+ID 247 only reads; send it with any value. Its reply in place of the stored
+value: 9 × u8 each compressor's gain reduction now in whole dB (channels
+1–8, then the mix), u16 the delay's tempo in 0.1 BPM, 0 while its clock is
+stopped.
+
 ## Streams
 
 **3F Stream.** One small request, many replies: each reply frame carries
@@ -555,9 +599,10 @@ beside it.
 | 4 | Nothing, or u16 first, u16 entries | The browsed folder's listing |
 | 5 | | The EQ: 72 records of 33 bytes |
 | 6 | | The filter: 72 records of 16 bytes |
+| 7 | | The mix effects' settings: 161 bytes |
 
 Each reply frame's data is u8 kind, u16 index (the byte offset, column,
-first entry or first record this frame starts at), then the data. A frame
+first entry, first record or settings byte this frame starts at), then the data. A frame
 that fails carries its result and ends the stream.
 
 An EQ record: u16 HPF, 3 × u16 frequency step, 3 × s16 gain, u8 On, u8 own EQ,
@@ -567,6 +612,11 @@ channel: zones 1–8, then the channel's own.
 A filter record: u8 type, u16 cutoff step, u8 resonance, u8 extra, u8 own filter,
 4 × s8 CV source, 4 × s8 CV amount, s16 Right offset (141): 16 bytes; the
 records run as the EQ's.
+
+The mix effects' settings: u8 format (1), nine compressors of 8 bytes in
+the order of IDs 200–207 (channels 1–8, then the mix), 8 × u8 Reverb send,
+8 × u8 Delay send, the 12 bytes of IDs 215–226, 8 × 2 send routes and 10 mix
+routes as s8 source and s8 amount, then 8 × u8 Sends (0 Post, 1 Pre).
 
 ## Automation
 

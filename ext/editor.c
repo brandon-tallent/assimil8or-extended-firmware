@@ -102,6 +102,8 @@ enum {
  * (resample.c) follows them. */
 #define SET_GRAIN_FIRST 160u
 #define SET_RESAMPLE_FIRST 172u
+/* Mix effects (mix_page.c), MIX_SET_* from here; past the grain values. */
+#define SET_MIX_FIRST 200u
 static const struct parameter channel_parameters[CHANNEL_PARAMETERS] = {
     {0x270, 2, 0, -9600, 6000},   /* pitch, cents */
     {0x272, 2, 0, -900, 60},      /* level, 0.1 dB */
@@ -285,6 +287,7 @@ static u32 set_parameter(const u8 *p, u8 *out, u32 *count)
 {
     u32 channel = p[0], zone = p[1];
     struct parameter parameter;
+    if (p[2] >= SET_MIX_FIRST) return mix_set(channel, p[2] - SET_MIX_FIRST, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_GRAIN_FIRST + GRAIN_SET_SLIDE) return grain_set(channel, p[2] - SET_GRAIN_FIRST, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_RESAMPLE_FIRST) return resample_set(channel, zone, p[2] - SET_RESAMPLE_FIRST, (s32)get_u32(p + 3), out, count);
     if (p[2] >= SET_GRAIN_FIRST) return grain_set(channel, p[2] - SET_GRAIN_FIRST, (s32)get_u32(p + 3), out, count);
@@ -644,7 +647,9 @@ static u32 summary(u8 *out, u32 *count)
     /* Each channel's Time Lock. */
     at += n + 13;
     for (u32 c = 0; c < PRESET_CHANNELS; ++c) out[at++] = time_lock_channels[c];
-    *count = at;
+    /* The mix effects' settings in effect. */
+    put_u32(out + at, ~crc32_update(~0u, mix_now(), sizeof(struct mix_settings)));
+    *count = at + 4;
     return OK;
 }
 
@@ -775,7 +780,7 @@ static void foreground(void)
     /* What is sounding and what a take is doing are read while a take
      * holds storage. */
     if (command == EDIT_SET && (p[2] == SET_GRAIN_FIRST + GRAIN_SET_STATUS || p[2] == SET_GRAIN_FIRST + GRAIN_SET_VIEW ||
-                                p[2] == SET_GRAIN_FIRST + GRAIN_SET_ROUTES ||
+                                p[2] == SET_GRAIN_FIRST + GRAIN_SET_ROUTES || p[2] == SET_MIX_FIRST + MIX_SET_STATUS ||
                                 p[2] == SET_RESAMPLE_FIRST + 1u || p[2] == SET_RESAMPLE_FIRST + 4u)) {
         status = set_parameter(p, out, &count);
         goto done;
